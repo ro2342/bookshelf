@@ -8,7 +8,8 @@ const firebaseConfig = {
     apiKey: "AIzaSyAY2sjNC_-RQa3SjO8ASC_44Q10mdR0n24",
     authDomain: "booktracker-afdfa.firebaseapp.com",
     projectId: "booktracker-afdfa",
-    storageBucket: "booktracker-afdfa.appspot.com",
+    // **FIX**: Corrigido o nome do bucket de armazenamento para corresponder à configuração do CORS
+    storageBucket: "booktracker-afdfa.firebasestorage.app",
     messagingSenderId: "626116591231",
     appId: "1:626116591231:web:52953d422d580a8da3094a",
     measurementId: "G-HV1JL3129W"
@@ -114,7 +115,7 @@ function initFirebase() {
         app = initializeApp(firebaseConfig);
         db = getFirestore(app);
         auth = getAuth(app);
-        storage = getStorage(app); // Inicializa o Firebase Storage
+        storage = getStorage(app);
         initTheme();
 
         onAuthStateChanged(auth, (user) => {
@@ -200,12 +201,10 @@ function listenToProfile() {
     const profileDocRef = doc(db, "users", userId, "profile", "data");
     profileUnsubscribe = onSnapshot(profileDocRef, (doc) => {
         userProfile = doc.exists() ? doc.data() : {};
-        // Se o perfil não tiver nome e o user do google tiver, usa o do google
         const currentUser = auth.currentUser;
         if (!userProfile.name && currentUser?.displayName) {
             userProfile.name = currentUser.displayName;
         }
-        // Se não tiver avatar, usa o do google
         if (!userProfile.avatarUrl && currentUser?.photoURL) {
             userProfile.avatarUrl = currentUser.photoURL;
         }
@@ -423,7 +422,7 @@ function renderEstante() {
         btn.onclick = (e) => {
             currentFilter = e.currentTarget.dataset.filter;
             currentPage = 1;
-            renderShelfContent(); // FIX: Re-render the shelf to update button states
+            renderShelfContent();
         };
     });
 }
@@ -697,7 +696,6 @@ function renderProfile() {
             const downloadURL = await getDownloadURL(snapshot.ref);
 
             document.getElementById('avatarUrl').value = downloadURL;
-            // Mostra a nova imagem como selecionada
             document.querySelectorAll('.avatar-option').forEach(el => el.classList.remove('!border-[hsl(var(--md-sys-color-primary))]'));
             const uploadLabel = document.querySelector('label[for="avatar-upload"]');
             uploadLabel.style.backgroundImage = `url(${downloadURL})`;
