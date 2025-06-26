@@ -17,8 +17,9 @@
         rel="stylesheet">
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
-    <!-- **FIX**: PapaParse carregado localmente -->
+    <!-- **FIX**: Bibliotecas carregadas no head -->
     <script src="papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 
 <body class="bg-[hsl(var(--md-sys-color-surface))]">
@@ -107,6 +108,10 @@
             class="hidden fixed bottom-24 right-6 md:bottom-12 md:right-12 z-40 bg-[hsl(var(--md-sys-color-primary))] text-[hsl(var(--md-sys-color-on-primary))] rounded-2xl p-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105">
             <span class="material-symbols-outlined !text-4xl">add</span>
         </a>
+
+        <!-- Elemento oculto para gerar a imagem de partilha -->
+        <div id="share-image-generator" class="fixed -top-[9999px] -left-[9999px]"></div>
+
     </div>
 
     <script type="module" src="app.js"></script>

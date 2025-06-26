@@ -176,3 +176,22 @@ body {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+/* Estilo para a imagem de partilha gerada */
+#share-image-template {
+    width: 600px;
+    background-color: #1a1c1e;
+    color: white;
+    padding: 2.5rem;
+    border-radius: 20px;
+    font-family: 'Manrope', sans-serif;
+}
+
+/* Estilo para a pré-visualização da capa no formulário */
+.book-cover-preview {
+    width: 8rem;
+    margin-left: auto;
+    margin-right: auto;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
