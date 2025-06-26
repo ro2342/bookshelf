@@ -14,6 +14,9 @@ const firebaseConfig = {
     measurementId: "G-HV1JL3129W"
 };
 
+const GOOGLE_BOOKS_API_KEY = "AIzaSyAVtbiQ6V2O0GhRk8aStfkSENRYy9xsa5U";
+
+
 let app, db, auth, storage;
 let userId = null;
 let booksUnsubscribe = () => { };
@@ -23,6 +26,9 @@ let userProfile = {};
 let currentFilter = 'todos';
 let currentPage = 1;
 let itemsPerPage = 10;
+let apiSearchResults = [];
+let currentApiResultIndex = 0;
+
 
 // --- SISTEMA DE TEMAS ---
 const themes = {
@@ -69,13 +75,12 @@ function showModal(title, content, actions = []) {
     const modalContent = document.getElementById('modal-content');
 
     let actionsHtml = actions.map(action => `<button id="${action.id}" class="btn-expressive ${action.class}">${action.text}</button>`).join('');
-    const closeButtonHtml = actions.length === 0 ? '<button id="modal-close-btn" class="btn-expressive btn-text">Fechar</button>' : '';
+    const closeButtonHtml = `<button id="modal-close-x" class="absolute top-4 right-4 text-neutral-500 hover:text-white text-3xl leading-none">&times;</button>`;
 
-    modalContent.innerHTML = `<h2 class="text-2xl font-bold mb-4">${title}</h2><div class="text-neutral-300 mb-6">${content}</div><div class="flex gap-4 justify-end">${closeButtonHtml}${actionsHtml}</div>`;
+    modalContent.innerHTML = `<div class="relative">${closeButtonHtml}<h2 class="text-2xl font-bold mb-4">${title}</h2><div class="text-neutral-300 mb-6">${content}</div><div class="flex gap-4 justify-end">${actionsHtml}</div></div>`;
     modalContainer.classList.remove('hidden');
 
-    const closeBtn = document.getElementById('modal-close-btn');
-    if (closeBtn) closeBtn.onclick = hideModal;
+    document.getElementById('modal-close-x').onclick = hideModal;
 
     actions.forEach(action => {
         const btn = document.getElementById(action.id);
@@ -84,10 +89,19 @@ function showModal(title, content, actions = []) {
             if (!action.keepOpen) hideModal();
         };
     });
+
+    document.addEventListener('keydown', handleEscKey);
 }
 
 function hideModal() {
     document.getElementById('modal-container').classList.add('hidden');
+    document.removeEventListener('keydown', handleEscKey);
+}
+
+function handleEscKey(event) {
+    if (event.key === 'Escape') {
+        hideModal();
+    }
 }
 
 function showLoading(message = 'Aguarde...') {
@@ -379,7 +393,7 @@ function renderEstante() {
     const displayName = userProfile.name || 'Leitor(a)';
     const avatarUrl = userProfile.avatarUrl || 'https://placehold.co/200x200/171717/FFFFFF?text=A';
 
-    const statusMap = { todos: 'Todos', lendo: 'Lendo Agora', lido: 'Lidos', abandonado: 'Abandonados', 'quero-ler': 'Quero Ler', favorito: 'Favoritos' };
+    const statusMap = { todos: 'Todos', lendo: 'Lendo Agora', lido: 'Lidos', abandonado: 'Abandonados', 'quero-ler': 'Quero Ler', favorito: 'Favoritos', comCapa: 'Com Capa', semCapa: 'Sem Capa' };
     const counts = {
         todos: allBooks.length,
         lendo: allBooks.filter(b => b.status === 'lendo').length,
@@ -387,6 +401,8 @@ function renderEstante() {
         'quero-ler': allBooks.filter(b => b.status === 'quero-ler').length,
         abandonado: allBooks.filter(b => b.status === 'abandonado').length,
         favorito: allBooks.filter(b => b.favorite).length,
+        comCapa: allBooks.filter(b => b.coverUrl).length,
+        semCapa: allBooks.filter(b => !b.coverUrl).length
     };
 
     page.innerHTML = `
@@ -424,6 +440,9 @@ function renderEstante() {
             currentFilter = e.currentTarget.dataset.filter;
             currentPage = 1;
             renderShelfContent();
+            // Atualiza o destaque do botão
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            e.currentTarget.classList.add('active');
         };
     });
 }
@@ -435,6 +454,8 @@ function renderShelfContent() {
     const filteredBooks = allBooks.filter(book => {
         if (currentFilter === 'todos') return true;
         if (currentFilter === 'favorito') return book.favorite;
+        if (currentFilter === 'comCapa') return !!book.coverUrl;
+        if (currentFilter === 'semCapa') return !book.coverUrl;
         return book.status === currentFilter;
     });
 
@@ -796,22 +817,25 @@ async function renderForm(bookId = null) {
                         <label for="title" class="block text-sm font-bold mb-2 text-neutral-300">Título</label>
                         <div class="flex items-center gap-2">
                             <input type="text" id="title" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0" value="${book.title || ''}" required>
-                            <button type="button" id="metadata-search-btn" class="btn-expressive btn-tonal h-auto py-2 px-3 shrink-0" title="Buscar Dados do Livro">
-                                <span class="material-symbols-outlined">auto_fix_high</span>
-                            </button>
+                            <button type="button" id="metadata-search-btn" class="btn-expressive btn-tonal h-auto py-2 px-3 shrink-0">Procurar Edição</button>
                         </div>
+                    </div>
+                    <div class="md:col-span-2">
+                         <div id="cover-preview-container" class="mt-4">
+                            ${book.coverUrl ? `<img src="${book.coverUrl}" class="w-32 mx-auto rounded-lg shadow-md">` : ''}
+                         </div>
                     </div>
                     <div>
                         <label for="author" class="block text-sm font-bold mb-2 text-neutral-300">Autor</label>
-                        <input type="text" id="author" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0" value="${book.author || ''}" required>
+                        <input type="text" id="author" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.author || ''}" required>
                     </div>
                      <div>
                         <label for="isbn" class="block text-sm font-bold mb-2 text-neutral-300">ISBN</label>
-                        <input type="text" id="isbn" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0" value="${book.isbn || ''}">
+                        <input type="text" id="isbn" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.isbn || ''}">
                     </div>
                     <div class="md:col-span-2">
                         <label for="coverUrl" class="block text-sm font-bold mb-2 text-neutral-300">URL da Capa</label>
-                        <input type="url" id="coverUrl" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0" value="${book.coverUrl || ''}">
+                        <input type="url" id="coverUrl" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.coverUrl || ''}">
                     </div>
                 </div>
 
@@ -842,11 +866,11 @@ async function renderForm(bookId = null) {
                         
                         <div>
                             <label for="startDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Início</label>
-                            <input type="date" id="startDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0" value="${book.startDate || ''}">
+                            <input type="date" id="startDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.startDate || ''}">
                         </div>
                         <div>
                             <label for="endDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Conclusão</label>
-                            <input type="date" id="endDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0" value="${book.endDate || ''}">
+                            <input type="date" id="endDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.endDate || ''}">
                         </div>
 
                         <div class="md:col-span-2 grid grid-cols-3 gap-4">
@@ -1130,61 +1154,34 @@ function renderProgressUpdater(book) {
     `;
 }
 
+// --- FUNÇÕES DA GOOGLE BOOKS API ---
+
 async function handleMetadataSearch() {
     const title = document.getElementById('title').value;
     if (!title) {
         showModal("Falta o Título", "Por favor, insira um título de livro para buscar os dados.", []);
         return;
     }
-    showLoading('Buscando dados do livro...');
+    if (!GOOGLE_BOOKS_API_KEY || GOOGLE_BOOKS_API_KEY === "SUA_CHAVE_DE_API_AQUI") {
+        showModal("API Key Faltando", "Por favor, adicione sua chave da Google Books API no ficheiro app.js.", []);
+        return;
+    }
 
-    const prompt = `Encontre os metadados para o livro com o título: "${title}". Priorize fontes como Kobo, Google Books, ou sites de editoras. Retorne um objeto JSON com os seguintes campos: 'author', 'synopsis', 'pages' (como número), 'isbn' (o ISBN-13 se possível), 'coverUrl' (URL direta para imagem de alta qualidade), e 'categories' (uma string com 3-5 categorias separadas por vírgula). Se um campo não for encontrado, retorne uma string vazia "" para ele, exceto para 'pages' que deve ser 0.`;
-
-    const payload = {
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: "OBJECT",
-                properties: {
-                    author: { "type": "STRING" },
-                    synopsis: { "type": "STRING" },
-                    pages: { "type": "NUMBER" },
-                    isbn: { "type": "STRING" },
-                    coverUrl: { "type": "STRING" },
-                    categories: { "type": "STRING" },
-                }
-            }
-        }
-    };
-
-    const apiKey = ""; // API Key will be injected by the environment
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+    showLoading('A procurar edições...');
+    const query = encodeURIComponent(`intitle:${title}`);
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&key=${GOOGLE_BOOKS_API_KEY}&maxResults=10`;
 
     try {
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (!response.ok) {
-            const errorBody = await response.text();
-            throw new Error(`API Error: ${response.statusText} - ${errorBody}`);
-        }
-        const result = await response.json();
-        hideModal();
+        const response = await fetch(url);
+        const data = await response.json();
 
-        if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts) {
-            const bookData = JSON.parse(result.candidates[0].content.parts[0].text);
-            document.getElementById('author').value = bookData.author || '';
-            document.getElementById('synopsis').value = bookData.synopsis || '';
-            document.getElementById('totalPages').value = bookData.pages || '';
-            document.getElementById('isbn').value = bookData.isbn || '';
-            document.getElementById('coverUrl').value = bookData.coverUrl || '';
-            document.getElementById('categories').value = bookData.categories || '';
-            showModal("Dados Preenchidos!", "Os dados do livro foram preenchidos. Revise antes de salvar.", []);
+        if (data.items && data.items.length > 0) {
+            apiSearchResults = data.items;
+            currentApiResultIndex = 0;
+            showApiResultsModal();
         } else {
-            throw new Error("Resposta da API inválida ou sem conteúdo.");
+            hideModal();
+            showModal("Nenhum Resultado", "Nenhum livro foi encontrado com este título.", []);
         }
     } catch (error) {
         console.error("Erro na busca de metadados:", error);
@@ -1192,6 +1189,82 @@ async function handleMetadataSearch() {
         showModal("Erro na Busca", `Não foi possível buscar os dados do livro: ${error.message}`, []);
     }
 }
+
+function showApiResultsModal() {
+    const book = apiSearchResults[currentApiResultIndex];
+    if (!book) return;
+
+    const volumeInfo = book.volumeInfo;
+    const coverUrl = volumeInfo.imageLinks?.thumbnail || 'https://placehold.co/400x600/171717/FFFFFF?text=Sem+Capa';
+    const title = volumeInfo.title || 'Título desconhecido';
+    const authors = volumeInfo.authors ? volumeInfo.authors.join(', ') : 'Autor desconhecido';
+    const pages = volumeInfo.pageCount ? `${volumeInfo.pageCount} páginas` : '';
+    const isbn = volumeInfo.industryIdentifiers?.find(i => i.type === "ISBN_13")?.identifier || '';
+
+    const content = `
+        <div class="flex flex-col md:flex-row gap-4">
+            <img src="${coverUrl}" class="w-24 md:w-1/3 rounded-lg shadow-md mx-auto">
+            <div class="flex-grow">
+                <h3 class="font-bold text-lg">${title}</h3>
+                <p class="text-sm text-neutral-400">${authors}</p>
+                <p class="text-xs text-neutral-500 mt-1">${pages} | ISBN: ${isbn}</p>
+                <p class="text-sm mt-2 line-clamp-3">${volumeInfo.description || ''}</p>
+            </div>
+        </div>
+        <div class="flex justify-between items-center mt-4">
+             <button id="prev-book-btn" class="btn-expressive btn-text !h-10 !p-2">&lt; Anterior</button>
+             <span>${currentApiResultIndex + 1} / ${apiSearchResults.length}</span>
+             <button id="next-book-btn" class="btn-expressive btn-text !h-10 !p-2">Próxima &gt;</button>
+        </div>
+    `;
+
+    const actions = [
+        { id: 'select-book-btn', text: '<span class="material-symbols-outlined !text-base mr-2">done</span>É essa!', class: 'btn-primary', onClick: selectApiBook },
+    ];
+
+    showModal(`Resultados da Busca`, content, actions);
+
+    document.getElementById('prev-book-btn').disabled = currentApiResultIndex === 0;
+    document.getElementById('next-book-btn').disabled = currentApiResultIndex === apiSearchResults.length - 1;
+    document.getElementById('prev-book-btn').onclick = showPrevApiBook;
+    document.getElementById('next-book-btn').onclick = showNextApiBook;
+
+}
+
+function showNextApiBook() {
+    if (currentApiResultIndex < apiSearchResults.length - 1) {
+        currentApiResultIndex++;
+        showApiResultsModal();
+    }
+}
+
+function showPrevApiBook() {
+    if (currentApiResultIndex > 0) {
+        currentApiResultIndex--;
+        showApiResultsModal();
+    }
+}
+
+function selectApiBook() {
+    const book = apiSearchResults[currentApiResultIndex].volumeInfo;
+    document.getElementById('title').value = book.title || '';
+    document.getElementById('author').value = book.authors ? book.authors.join(', ') : '';
+    document.getElementById('synopsis').value = book.description || '';
+    document.getElementById('totalPages').value = book.pageCount || '';
+    document.getElementById('isbn').value = book.industryIdentifiers?.find(i => i.type === "ISBN_13")?.identifier || '';
+    const coverUrl = book.imageLinks?.thumbnail || '';
+    document.getElementById('coverUrl').value = coverUrl;
+
+    const previewContainer = document.getElementById('cover-preview-container');
+    if (coverUrl) {
+        previewContainer.innerHTML = `<img src="${coverUrl}" class="w-32 mx-auto rounded-lg shadow-md">`;
+    } else {
+        previewContainer.innerHTML = '';
+    }
+
+    hideModal();
+}
+
 
 function handleCsvExport() {
     if (allBooks.length === 0) {
@@ -1281,20 +1354,33 @@ function handleCsvImport(event) {
             }).filter(b => b.title && b.author);
 
             if (booksToImport.length > 0) {
-                try {
-                    const batch = writeBatch(db);
-                    const collectionRef = collection(db, "users", userId, "books");
-                    booksToImport.forEach(bookData => {
-                        const docRef = doc(collectionRef);
-                        batch.set(docRef, bookData);
-                    });
-                    await batch.commit();
-                    hideModal();
-                    showModal("Importação Concluída", `${booksToImport.length} livros foram importados com sucesso!`, []);
-                } catch (error) {
-                    hideModal();
-                    showModal("Erro na Importação", "Ocorreu um problema ao salvar os livros no banco de dados.");
+                showLoading(`Enriquecendo dados de ${booksToImport.length} livros...`);
+                const batch = writeBatch(db);
+                const collectionRef = collection(db, "users", userId, "books");
+
+                for (const bookData of booksToImport) {
+                    try {
+                        const query = encodeURIComponent(`intitle:${bookData.title}+inauthor:${bookData.author}`);
+                        const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&key=${GOOGLE_BOOKS_API_KEY}&maxResults=1`;
+                        const response = await fetch(url);
+                        const apiData = await response.json();
+                        if (apiData.items && apiData.items.length > 0) {
+                            const bookApi = apiData.items[0].volumeInfo;
+                            bookData.coverUrl = bookApi.imageLinks?.thumbnail || '';
+                            if (!bookData.synopsis) bookData.synopsis = bookApi.description || '';
+                        }
+                    } catch (e) {
+                        console.warn("Não foi possível enriquecer dados para: ", bookData.title, e);
+                    }
+
+                    const docRef = doc(collectionRef);
+                    batch.set(docRef, bookData);
                 }
+
+                await batch.commit();
+                hideModal();
+                showModal("Importação Concluída", `${booksToImport.length} livros foram importados e atualizados com sucesso!`, []);
+
             } else {
                 hideModal();
                 showModal("Nenhum livro válido", "Não foram encontrados livros válidos para importar no arquivo CSV.");
