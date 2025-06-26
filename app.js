@@ -8,7 +8,6 @@ const firebaseConfig = {
     apiKey: "AIzaSyAY2sjNC_-RQa3SjO8ASC_44Q10mdR0n24",
     authDomain: "booktracker-afdfa.firebaseapp.com",
     projectId: "booktracker-afdfa",
-    // **FIX**: Corrigido o nome do bucket de armazenamento para corresponder à configuração do CORS
     storageBucket: "booktracker-afdfa.firebasestorage.app",
     messagingSenderId: "626116591231",
     appId: "1:626116591231:web:52953d422d580a8da3094a",
@@ -202,11 +201,13 @@ function listenToProfile() {
     profileUnsubscribe = onSnapshot(profileDocRef, (doc) => {
         userProfile = doc.exists() ? doc.data() : {};
         const currentUser = auth.currentUser;
-        if (!userProfile.name && currentUser?.displayName) {
-            userProfile.name = currentUser.displayName;
-        }
-        if (!userProfile.avatarUrl && currentUser?.photoURL) {
-            userProfile.avatarUrl = currentUser.photoURL;
+        if (currentUser) {
+            if (!userProfile.name && currentUser.displayName) {
+                userProfile.name = currentUser.displayName;
+            }
+            if (!userProfile.avatarUrl && currentUser.photoURL) {
+                userProfile.avatarUrl = currentUser.photoURL;
+            }
         }
 
         router();
@@ -638,11 +639,8 @@ function renderProfile() {
                                  ${userProfile.avatarUrl === url ? '!border-[hsl(var(--md-sys-color-primary))]' : ''}"
                             >
                         `).join('')}
-                        <label for="avatar-upload" class="avatar-option w-24 h-24 rounded-full bg-neutral-700 flex items-center justify-center cursor-pointer border-4 border-transparent hover:border-[hsl(var(--md-sys-color-primary))] transition-all">
-                            <span class="material-symbols-outlined !text-4xl">add_a_photo</span>
-                            <input type="file" id="avatar-upload" class="hidden" accept="image/*">
-                        </label>
                     </div>
+                     <p class="text-xs text-neutral-500 mt-4 text-center">Para alterar a sua foto de perfil, <a href="https://myaccount.google.com/" target="_blank" class="text-[hsl(var(--md-sys-color-primary))] hover:underline">atualize na sua Conta Google</a>.</p>
                 </div>
             
                 <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -684,30 +682,6 @@ function renderProfile() {
             document.getElementById('avatarUrl').value = img.dataset.url;
         }
     });
-
-    document.getElementById('avatar-upload').onchange = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-
-        showLoading("A fazer upload da imagem...");
-        const storageRef = ref(storage, `profile-pictures/${userId}`);
-        try {
-            const snapshot = await uploadBytes(storageRef, file);
-            const downloadURL = await getDownloadURL(snapshot.ref);
-
-            document.getElementById('avatarUrl').value = downloadURL;
-            document.querySelectorAll('.avatar-option').forEach(el => el.classList.remove('!border-[hsl(var(--md-sys-color-primary))]'));
-            const uploadLabel = document.querySelector('label[for="avatar-upload"]');
-            uploadLabel.style.backgroundImage = `url(${downloadURL})`;
-            uploadLabel.classList.add('!border-[hsl(var(--md-sys-color-primary))]');
-
-            hideModal();
-        } catch (error) {
-            console.error("Erro no upload da imagem: ", error);
-            hideModal();
-            showModal("Erro de Upload", "Não foi possível carregar a sua imagem.");
-        }
-    };
 
     document.getElementById('profile-form').onsubmit = (e) => {
         e.preventDefault();
