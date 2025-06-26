@@ -1399,3 +1399,6 @@ function handleCsvImport(event) {
 window.addEventListener('load', () => {
     initFirebase();
 });
+
+
+// teste para ver se está indo esse arquivo
