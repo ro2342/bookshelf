@@ -28,6 +28,7 @@ let currentPage = 1;
 let itemsPerPage = 10;
 let apiSearchResults = [];
 let currentApiResultIndex = 0;
+let shelfSearchTerm = '';
 
 
 // --- SISTEMA DE TEMAS ---
@@ -388,6 +389,18 @@ function updateNavLinks(activeHash) {
     });
 }
 
+function normalizeText(text) {
+    if (!text) return '';
+    return text
+        .toString()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
+        .replace(/\s+/g, ' ');
+}
+
+
 function renderEstante() {
     const page = document.getElementById('page-estante');
     const displayName = userProfile.name || 'Leitor(a)';
@@ -419,6 +432,11 @@ function renderEstante() {
                  <h1 class="font-display text-5xl md:text-6xl">Minha estante</h1>
                  <p class="text-neutral-400 mt-2">Tudo o que você leu, vai ler, quer ler. Ou abandonou. Sem julgamentos.</p>
             </div>
+            
+            <div class="relative">
+                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">search</span>
+                 <input type="search" id="shelf-search-input" placeholder="Buscar na sua estante por título ou autor..." class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 pl-12 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0">
+            </div>
 
             <div class="segmented-btn-container flex-wrap flex gap-2">
                 ${Object.keys(statusMap).map(key => `
@@ -440,26 +458,45 @@ function renderEstante() {
             currentFilter = e.currentTarget.dataset.filter;
             currentPage = 1;
             renderShelfContent();
-            // Atualiza o destaque do botão
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             e.currentTarget.classList.add('active');
         };
     });
+
+    const searchInput = document.getElementById('shelf-search-input');
+    searchInput.oninput = (e) => {
+        shelfSearchTerm = e.target.value;
+        currentPage = 1;
+        renderShelfContent();
+    };
 }
 
 function renderShelfContent() {
     const contentContainer = document.getElementById('shelf-content');
     if (!contentContainer) return;
 
-    const filteredBooks = allBooks.filter(book => {
-        if (currentFilter === 'todos') return true;
-        if (currentFilter === 'favorito') return book.favorite;
-        if (currentFilter === 'comCapa') return !!book.coverUrl;
-        if (currentFilter === 'semCapa') return !book.coverUrl;
-        return book.status === currentFilter;
-    });
+    let booksToDisplay = allBooks;
 
-    const totalItems = filteredBooks.length;
+    // Aplicar filtro de status
+    if (currentFilter !== 'todos') {
+        booksToDisplay = booksToDisplay.filter(book => {
+            if (currentFilter === 'favorito') return book.favorite;
+            if (currentFilter === 'comCapa') return !!book.coverUrl;
+            if (currentFilter === 'semCapa') return !book.coverUrl;
+            return book.status === currentFilter;
+        });
+    }
+
+    // Aplicar filtro de busca
+    if (shelfSearchTerm) {
+        const normalizedSearch = normalizeText(shelfSearchTerm);
+        booksToDisplay = booksToDisplay.filter(book =>
+            normalizeText(book.title).includes(normalizedSearch) ||
+            (book.author && normalizeText(book.author).includes(normalizedSearch))
+        );
+    }
+
+    const totalItems = booksToDisplay.length;
     const totalPages = itemsPerPage > 0 ? Math.ceil(totalItems / itemsPerPage) : 1;
     if (currentPage > totalPages && totalPages > 0) {
         currentPage = totalPages;
@@ -467,7 +504,7 @@ function renderShelfContent() {
 
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = itemsPerPage > 0 ? startIndex + itemsPerPage : totalItems;
-    const paginatedBooks = filteredBooks.slice(startIndex, endIndex);
+    const paginatedBooks = booksToDisplay.slice(startIndex, endIndex);
 
     if (paginatedBooks.length > 0) {
         contentContainer.innerHTML = paginatedBooks.map(bookCard).join('');
@@ -1062,9 +1099,9 @@ async function renderDetails(bookId) {
                     </div>
                     
                      <div class="flex flex-wrap gap-2 mb-8">${book.categories ? book.categories.split(',').map(cat => `<span class="bg-[hsla(var(--md-sys-color-primary),0.2)] text-[hsl(var(--md-sys-color-primary))] text-xs font-bold mr-2 px-2.5 py-1 rounded-full">${cat.trim()}</span>`).join('') : ''}</div>
-                     <div class="flex flex-col sm:flex-row gap-4 mt-auto">
+                     <div class="mt-auto flex flex-col sm:flex-row gap-4">
                         <a href="#/edit/${book.id}" class="btn-expressive btn-primary flex-1 !h-11 !text-sm"><span class="material-symbols-outlined mr-2">edit</span> Editar</a>
-                        <button id="delete-book-btn" class="btn-expressive btn-tonal bg-red-900/60 text-red-300 hover:bg-red-800 flex-1 !h-11 !text-sm"><span class="material-symbols-outlined mr-2">delete</span> Excluir</button>
+                        <button id="delete-book-btn" class="btn-expressive !h-11 !text-sm bg-red-900/60 text-red-300 hover:bg-red-800"><span class="material-symbols-outlined">delete</span></button>
                     </div>
                 </div>
             </div>
@@ -1169,7 +1206,7 @@ async function handleMetadataSearch() {
 
     showLoading('A procurar edições...');
     const query = encodeURIComponent(`intitle:${title}`);
-    const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&key=${GOOGLE_BOOKS_API_KEY}&maxResults=100`;
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&key=${GOOGLE_BOOKS_API_KEY}&maxResults=40`;
 
     try {
         const response = await fetch(url);
@@ -1399,6 +1436,3 @@ function handleCsvImport(event) {
 window.addEventListener('load', () => {
     initFirebase();
 });
-
-
-// teste para ver se está indo esse arquivo

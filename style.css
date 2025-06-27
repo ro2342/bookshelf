@@ -177,17 +177,21 @@ body {
     cursor: not-allowed;
 }
 
-/* Estilo para a imagem de partilha gerada */
-#share-image-template {
-    width: 600px;
-    background-color: #1a1c1e;
-    color: white;
-    padding: 2.5rem;
-    border-radius: 20px;
-    font-family: 'Manrope', sans-serif;
+/* Estilos para Mood Tags */
+.mood-tag-btn {
+    border: 1px solid hsl(var(--md-sys-color-outline));
+    transition: all 0.2s ease-in-out;
+}
+.mood-tag-btn.selected {
+    background-color: hsl(var(--md-sys-color-primary));
+    color: hsl(var(--md-sys-color-on-primary));
+    border-color: hsl(var(--md-sys-color-primary));
+}
+.mood-tag-pill {
+    background-color: hsla(var(--md-sys-color-primary), 0.2);
+    color: hsl(var(--md-sys-color-primary));
 }
 
-/* Estilo para a pré-visualização da capa no formulário */
 .book-cover-preview {
     width: 8rem;
     margin-left: auto;
