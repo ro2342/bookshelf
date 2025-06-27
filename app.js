@@ -440,6 +440,7 @@ function renderEstante() {
             currentFilter = e.currentTarget.dataset.filter;
             currentPage = 1;
             renderShelfContent();
+            // Atualiza o destaque do botão
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
             e.currentTarget.classList.add('active');
         };
@@ -1061,10 +1062,9 @@ async function renderDetails(bookId) {
                     </div>
                     
                      <div class="flex flex-wrap gap-2 mb-8">${book.categories ? book.categories.split(',').map(cat => `<span class="bg-[hsla(var(--md-sys-color-primary),0.2)] text-[hsl(var(--md-sys-color-primary))] text-xs font-bold mr-2 px-2.5 py-1 rounded-full">${cat.trim()}</span>`).join('') : ''}</div>
-                     <div class="mt-auto flex flex-col sm:flex-row gap-4">
-                        <button id="generate-share-image-btn" class="btn-expressive btn-tonal flex-1 !h-11 !text-sm"><span class="material-symbols-outlined mr-2">share</span>Partilhar</button>
+                     <div class="flex flex-col sm:flex-row gap-4 mt-auto">
                         <a href="#/edit/${book.id}" class="btn-expressive btn-primary flex-1 !h-11 !text-sm"><span class="material-symbols-outlined mr-2">edit</span> Editar</a>
-                        <button id="delete-book-btn" class="btn-expressive !h-11 !text-sm bg-red-900/60 text-red-300 hover:bg-red-800"><span class="material-symbols-outlined">delete</span></button>
+                        <button id="delete-book-btn" class="btn-expressive btn-tonal bg-red-900/60 text-red-300 hover:bg-red-800 flex-1 !h-11 !text-sm"><span class="material-symbols-outlined mr-2">delete</span> Excluir</button>
                     </div>
                 </div>
             </div>
@@ -1079,8 +1079,6 @@ async function renderDetails(bookId) {
     `;
 
     document.getElementById('delete-book-btn').onclick = () => showModal('Confirmar Exclusão', `Tem certeza que deseja excluir o livro "<strong>${book.title}</strong>"? Esta ação não pode ser desfeita.`, [{ id: 'confirm-delete-btn', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteBook(book.id) }]);
-    document.getElementById('generate-share-image-btn').onclick = () => generateShareableImage(book);
-
 
     if (book.status === 'lendo') {
         document.getElementById('update-progress-btn').onclick = () => {
@@ -1171,7 +1169,7 @@ async function handleMetadataSearch() {
 
     showLoading('A procurar edições...');
     const query = encodeURIComponent(`intitle:${title}`);
-    const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&key=${GOOGLE_BOOKS_API_KEY}&maxResults=10`;
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&key=${GOOGLE_BOOKS_API_KEY}&maxResults=100`;
 
     try {
         const response = await fetch(url);
@@ -1401,3 +1399,6 @@ function handleCsvImport(event) {
 window.addEventListener('load', () => {
     initFirebase();
 });
+
+
+// teste para ver se está indo esse arquivo
