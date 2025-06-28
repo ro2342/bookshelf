@@ -91,9 +91,11 @@ function showModal(title, content, actions = []) {
     let actionsHtml = actions.map(action => `<button id="${action.id}" class="btn-expressive ${action.class}">${action.text}</button>`).join('');
     const closeButtonHtml = `<button id="modal-close-x" class="absolute top-4 right-4 text-neutral-500 hover:text-white text-3xl leading-none">&times;</button>`;
 
-    modalContent.innerHTML = `<div class="relative">${closeButtonHtml}<h2 class="text-2xl font-bold mb-4">${title}</h2><div class="text-neutral-300 mb-6">${content}</div><div class="flex gap-4 justify-end">${actionsHtml}</div></div>`;
+    modalContent.innerHTML = `<div class="relative p-8 max-w-md w-full card-expressive">${closeButtonHtml}<h2 class="text-2xl font-bold mb-4">${title}</h2><div class="text-neutral-300 mb-6">${content}</div><div class="flex gap-4 justify-end">${actionsHtml}</div></div>`;
     modalContainer.classList.remove('hidden');
 
+    modalContent.firstChild.onclick = (e) => e.stopPropagation();
+    modalContainer.onclick = hideModal;
     document.getElementById('modal-close-x').onclick = hideModal;
 
     actions.forEach(action => {
@@ -108,7 +110,17 @@ function showModal(title, content, actions = []) {
 }
 
 function hideModal() {
-    document.getElementById('modal-container').classList.add('hidden');
+    const modalContainer = document.getElementById('modal-container');
+    modalContainer.classList.add('hidden');
+    document.getElementById('modal-content').innerHTML = '';
+
+    // Reseta o hash se um modal de livro ou formulário foi fechado
+    const currentHash = window.location.hash;
+    if (currentHash.includes('#/book/') || currentHash.includes('#/add') || currentHash.includes('#/edit/')) {
+        window.location.hash = '#/estante';
+    }
+
+    window.scrollTo(0, 0); // Rola a página principal para o topo
     document.removeEventListener('keydown', handleEscKey);
 }
 
@@ -121,7 +133,7 @@ function handleEscKey(event) {
 function showLoading(message = 'Aguarde...') {
     const modalContainer = document.getElementById('modal-container');
     const modalContent = document.getElementById('modal-content');
-    modalContent.innerHTML = `<div class="flex flex-col items-center justify-center p-4"><p class="text-lg font-semibold mb-4">${message}</p><div class="w-full bg-neutral-700 rounded-full h-2.5"><div class="bg-[hsl(var(--md-sys-color-primary))] h-2.5 rounded-full animate-pulse"></div></div></div>`;
+    modalContent.innerHTML = `<div class="flex flex-col items-center justify-center p-4 card-expressive"><p class="text-lg font-semibold mb-4">${message}</p><div class="w-full bg-neutral-700 rounded-full h-2.5"><div class="bg-[hsl(var(--md-sys-color-primary))] h-2.5 rounded-full animate-pulse"></div></div></div>`;
     modalContainer.classList.remove('hidden');
 }
 
@@ -335,7 +347,7 @@ async function deleteBook(bookId) {
         const docRef = doc(db, "users", userId, "books", bookId);
         await deleteDoc(docRef);
         console.log("Livro deletado:", bookId);
-        window.location.hash = '#/estante';
+        hideModal(); // Fecha o modal de detalhes após deletar
     } catch (error) {
         console.error("Erro ao deletar livro: ", error);
         showModal("Erro", "Não foi possível deletar o livro.");
@@ -343,7 +355,7 @@ async function deleteBook(bookId) {
 }
 
 // --- Funções do Router e Renderização ---
-const pages = ['estatisticas', 'estante', 'form', 'details', 'profile', 'settings'];
+const pages = ['estatisticas', 'estante', 'profile', 'settings']; // A página 'form' foi removida
 function hideAllPages() {
     pages.forEach(pageId => {
         const pageEl = document.getElementById(`page-${pageId}`);
@@ -359,21 +371,36 @@ function router() {
         if (loader) loader.classList.remove('hidden');
         return;
     };
+
+    const currentHash = window.location.hash || '#/estante';
+    const [path, param] = currentHash.substring(2).split('/');
+
+    // Funções que abrem modais
+    const modalRoutes = {
+        'book': renderDetailsInModal,
+        'add': renderFormInModal,
+        'edit': renderFormInModal,
+    };
+
+    if (modalRoutes[path]) {
+        hideAllPages();
+        const pageEstante = document.getElementById('page-estante');
+        if (pageEstante.innerHTML === '') renderEstante();
+        pageEstante.classList.remove('hidden');
+        modalRoutes[path](param); // param será o bookId para 'book' e 'edit'
+        return;
+    }
+
+    if (!document.getElementById('modal-container').classList.contains('hidden')) {
+        hideModal();
+    }
+
     hideAllPages();
+    updateNavLinks(currentHash);
 
-    const hash = window.location.hash || '#/estante';
-    const [path, param] = hash.substring(2).split('/');
-
-    updateNavLinks(hash);
-
-    let pageId = path;
-    if (path === 'add' || path === 'edit') pageId = 'form';
-    else if (path === 'book') pageId = 'details';
-    else if (path === 'inicio') { window.location.hash = '#/estante'; return; }
-
+    const pageId = path === 'inicio' ? 'estante' : path;
     const fab = document.getElementById('fab-add-book');
-    const pagesToShowFab = ['estante', 'estatisticas'];
-    fab.classList.toggle('hidden', !pagesToShowFab.includes(path));
+    fab.classList.toggle('hidden', path !== 'estante' && path !== 'estatisticas' && path !== 'inicio');
 
     const targetPage = document.getElementById(`page-${pageId}`);
     if (targetPage) {
@@ -381,8 +408,6 @@ function router() {
         switch (pageId) {
             case 'estatisticas': renderEstatisticas(); break;
             case 'estante': renderEstante(); break;
-            case 'form': renderForm(param); break;
-            case 'details': renderDetails(param); break;
             case 'profile': renderProfile(); break;
             case 'settings': renderSettings(); break;
             default:
@@ -506,20 +531,11 @@ function renderShelfContent() {
 
     renderPaginationControls(totalPages, totalItems);
 
+    // O evento de clique agora vai para um link de hash que o router vai interceptar
     document.querySelectorAll('.book-card-link').forEach(card => {
-        card.onclick = (e) => {
-            if (e.target.closest('button, a.btn-expressive')) return;
-            window.location.hash = e.currentTarget.dataset.href;
-        }
+        card.href = card.dataset.href;
     });
 
-    document.querySelectorAll('.delete-book-btn').forEach(button => {
-        button.onclick = (e) => {
-            const bookId = e.currentTarget.dataset.bookId;
-            const bookTitle = e.currentTarget.dataset.bookTitle;
-            showModal('Confirmar Exclusão', `Tem certeza que deseja excluir o livro "<strong>${bookTitle}</strong>"? Esta ação não pode ser desfeita.`, [{ id: 'confirm-delete-btn', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteBook(bookId) }]);
-        };
-    });
 }
 
 function bookCard(book) {
@@ -534,25 +550,22 @@ function bookCard(book) {
         : '';
 
     return `
-        <div data-href="#/book/${book.id}" class="book-card-link card-expressive p-4 flex flex-col sm:flex-row gap-4 cursor-pointer hover:bg-[hsl(var(--md-sys-color-surface-container-highest))]">
+        <a data-href="#/book/${book.id}" href="#/book/${book.id}" class="book-card-link card-expressive p-4 flex flex-col sm:flex-row gap-4 no-underline hover:bg-[hsl(var(--md-sys-color-surface-container-highest))]">
             <div class="w-1/3 sm:w-1/5 flex-shrink-0 mx-auto">
                 <img src="${book.coverUrl || 'https://placehold.co/400x600/171717/FFFFFF?text=Sem+Capa'}" alt="Capa de ${book.title}" class="w-full rounded-lg shadow-lg aspect-[2/3] object-cover">
             </div>
-            <div class="flex flex-col flex-grow text-center sm:text-left">
+            <div class="flex flex-col flex-grow text-center sm:text-left text-current">
                 <h2 class="font-display text-xl lg:text-2xl title-text-shadow font-bold leading-tight">${book.title}</h2>
                 <p class="text-sm text-neutral-400 mb-2">${book.author || 'Autor desconhecido'}</p>
                 <div class="flex items-center justify-center sm:justify-start gap-1 mb-2">${ratingHtml}</div>
                 ${feelingsHtml}
-                <div class="mt-auto pt-2 flex flex-col sm:flex-row gap-2">
-                     <a href="#/edit/${book.id}" class="btn-expressive btn-primary !h-10 !text-sm flex-1 flex items-center justify-center gap-2">
-                        <span class="material-symbols-outlined !text-base">edit</span>Editar
-                    </a>
-                    <button data-book-id="${book.id}" data-book-title="${book.title}" class="delete-book-btn btn-expressive !h-10 !text-sm flex-1 flex items-center justify-center gap-2 bg-red-900/60 text-red-300 hover:bg-red-800">
-                        <span class="material-symbols-outlined !text-base">delete</span>Excluir
-                    </button>
+                <div class="mt-auto pt-4 flex flex-col sm:flex-row gap-2">
+                     <div class="btn-expressive btn-primary !h-10 !text-sm flex-1 flex items-center justify-center gap-2">
+                        <span class="material-symbols-outlined !text-base">visibility</span>Ver Detalhes
+                    </div>
                 </div>
             </div>
-        </div>
+        </a>
     `;
 }
 
@@ -827,9 +840,9 @@ function renderSettings() {
     };
 }
 
-
-async function renderForm(bookId = null) {
-    const page = document.getElementById('page-form');
+async function renderFormInModal(bookId = null) {
+    const modalContainer = document.getElementById('modal-container');
+    const modalContent = document.getElementById('modal-content');
     let book = {};
     const isEditing = bookId !== null;
 
@@ -839,149 +852,161 @@ async function renderForm(bookId = null) {
 
     const selectedFeelings = book.feelings || [];
 
-    page.innerHTML = `
-        <div class="max-w-2xl mx-auto">
-            <h1 class="font-display text-5xl md:text-6xl mb-12">${isEditing ? 'Editar Livro' : 'Adicionar Novo Livro'}</h1>
-            <form id="book-form" class="space-y-8">
-                <input type="hidden" id="bookId" value="${book.id || ''}">
-                
-                <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="md:col-span-2">
-                        <label for="title" class="block text-sm font-bold mb-2 text-neutral-300">Título</label>
-                        <div class="flex items-center gap-2">
-                            <input type="text" id="title" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0" value="${book.title || ''}" required>
-                            <button type="button" id="metadata-search-btn" class="btn-expressive btn-tonal h-auto py-2 px-3 shrink-0">Procurar Edição</button>
-                        </div>
-                    </div>
-                    <div class="md:col-span-2">
-                         <div id="cover-preview-container" class="mt-4">
-                            ${book.coverUrl ? `<img src="${book.coverUrl}" class="w-32 mx-auto rounded-lg shadow-md">` : ''}
-                         </div>
-                    </div>
-                    <div>
-                        <label for="author" class="block text-sm font-bold mb-2 text-neutral-300">Autor</label>
-                        <input type="text" id="author" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.author || ''}" required>
-                    </div>
-                     <div>
-                        <label for="isbn" class="block text-sm font-bold mb-2 text-neutral-300">ISBN</label>
-                        <input type="text" id="isbn" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.isbn || ''}">
-                    </div>
-                    <div class="md:col-span-2">
-                        <label for="coverUrl" class="block text-sm font-bold mb-2 text-neutral-300">URL da Capa</label>
-                        <input type="url" id="coverUrl" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.coverUrl || ''}">
-                    </div>
-                </div>
-
-                <div class="card-expressive p-6">
-                    <h3 class="text-xl font-bold mb-4 text-[hsl(var(--md-sys-color-primary))]">Como este livro te fez sentir?</h3>
-                    <p class="text-neutral-400 mb-4 text-sm">Selecione até 5 sentimentos.</p>
-                    <div id="feelings-container" class="flex flex-wrap gap-2">
-                        ${sentimentos.map(s => `
-                            <button type="button" data-feeling="${s}" class="mood-tag-btn btn-expressive !py-1 !px-3 !h-auto !text-xs capitalize ${selectedFeelings.includes(s) ? 'selected' : ''}">
-                                ${s}
-                            </button>
-                        `).join('')}
-                    </div>
-                    <input type="hidden" id="feelingsValue" value="${selectedFeelings.join(',') || ''}">
-                </div>
-
-                <div class="card-expressive p-6">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-                         <div>
-                            <label for="status" class="block text-sm font-bold mb-2 text-neutral-300">Status</label>
-                            <select id="status" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0">
-                                <option value="quero-ler" ${book.status === 'quero-ler' ? 'selected' : ''}>Quero Ler</option>
-                                <option value="lendo" ${book.status === 'lendo' ? 'selected' : ''}>Lendo Agora</option>
-                                <option value="lido" ${book.status === 'lido' ? 'selected' : ''}>Lido</option>
-                                <option value="abandonado" ${book.status === 'abandonado' ? 'selected' : ''}>Abandonado</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-bold mb-2 text-neutral-300">Avaliação & Favorito</label>
-                            <div class="flex items-center gap-4">
-                                <div id="rating" class="flex items-center gap-1">
-                                    ${[1, 2, 3, 4, 5].map(i => `<span class="material-symbols-outlined star-icon !text-3xl cursor-pointer transition-colors ${Number(book.rating) >= i ? 'filled text-amber-400' : 'text-neutral-600'}" data-value="${i}">star</span>`).join('')}
-                                </div>
-                                <input type="hidden" id="ratingValue" value="${book.rating || 0}">
-                                <button type="button" id="favorite-btn" class="text-neutral-500 hover:text-red-500 transition-colors">
-                                    <span class="material-symbols-outlined !text-3xl ${book.favorite ? 'filled text-red-500' : ''}">favorite</span>
-                                </button>
-                                <input type="hidden" id="favoriteValue" value="${book.favorite ? 'true' : 'false'}">
+    const formHtml = `
+        <div class="card-expressive w-full max-w-5xl max-h-[90vh] flex flex-col relative">
+            <button id="modal-close-btn" class="absolute top-4 right-5 text-neutral-400 hover:text-white text-4xl leading-none z-10">&times;</button>
+            <div class="p-6 md:p-8 flex-grow overflow-y-auto">
+                <form id="book-form" class="space-y-6">
+                    <h1 class="font-display text-3xl md:text-4xl mb-6">${isEditing ? 'Editar Livro' : 'Adicionar Novo Livro'}</h1>
+                    <input type="hidden" id="bookId" value="${book.id || ''}">
+                    
+                    <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="md:col-span-2">
+                            <label for="title" class="block text-sm font-bold mb-2 text-neutral-300">Título</label>
+                            <div class="flex items-center gap-2">
+                                <input type="text" id="title" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0" value="${book.title || ''}" required>
+                                <button type="button" id="metadata-search-btn" class="btn-expressive btn-tonal h-auto py-2 px-3 shrink-0">Procurar Edição</button>
                             </div>
                         </div>
-                        
-                        <div>
-                            <label for="startDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Início</label>
-                            <input type="date" id="startDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.startDate || ''}">
+                        <div class="md:col-span-2 flex justify-center">
+                             <div id="cover-preview-container" class="mt-4">
+                                ${book.coverUrl ? `<img src="${book.coverUrl}" class="w-32 rounded-lg shadow-md">` : ''}
+                             </div>
                         </div>
                         <div>
-                            <label for="endDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Conclusão</label>
-                            <input type="date" id="endDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.endDate || ''}">
+                            <label for="author" class="block text-sm font-bold mb-2 text-neutral-300">Autor</label>
+                            <input type="text" id="author" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.author || ''}" required>
                         </div>
+                         <div>
+                            <label for="isbn" class="block text-sm font-bold mb-2 text-neutral-300">ISBN</label>
+                            <input type="text" id="isbn" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.isbn || ''}">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label for="coverUrl" class="block text-sm font-bold mb-2 text-neutral-300">URL da Capa</label>
+                            <input type="url" id="coverUrl" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.coverUrl || ''}">
+                        </div>
+                    </div>
 
-                        <div class="md:col-span-2 grid grid-cols-3 gap-4">
-                            <label for="media-type-fisico" class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] has-[:checked]:text-[hsl(var(--md-sys-color-on-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]">
-                                <span class="material-symbols-outlined mb-1">auto_stories</span>
-                                <span class="block text-sm font-bold">Físico</span>
-                                <input type="radio" name="mediaType" id="media-type-fisico" value="fisico" ${!book.mediaType || book.mediaType === 'fisico' ? 'checked' : ''} class="sr-only">
-                            </label>
-                             <label for="media-type-digital" class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] has-[:checked]:text-[hsl(var(--md-sys-color-on-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]">
-                                 <span class="material-symbols-outlined mb-1">tablet_mac</span>
-                                 <span class="block text-sm font-bold">Digital</span>
-                                <input type="radio" name="mediaType" id="media-type-digital" value="digital" ${book.mediaType === 'digital' ? 'checked' : ''} class="sr-only">
-                            </label>
-                             <label for="media-type-audiobook" class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] has-[:checked]:text-[hsl(var(--md-sys-color-on-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]">
-                                 <span class="material-symbols-outlined mb-1">headphones</span>
-                                 <span class="block text-sm font-bold">Audiolivro</span>
-                                <input type="radio" name="mediaType" id="media-type-audiobook" value="audiobook" ${book.mediaType === 'audiobook' ? 'checked' : ''} class="sr-only">
-                            </label>
+                    <div class="card-expressive p-6 space-y-4">
+                        <h3 class="text-xl font-bold text-[hsl(var(--md-sys-color-primary))]">Como este livro te fez sentir?</h3>
+                        <p class="text-neutral-400 text-sm">Selecione até 5 sentimentos.</p>
+                        <div id="feelings-container" class="flex flex-wrap gap-2">
+                            ${sentimentos.map(s => `
+                                <button type="button" data-feeling="${s}" class="mood-tag-btn btn-expressive !py-1 !px-3 !h-auto !text-xs capitalize ${selectedFeelings.includes(s) ? 'selected' : ''}">
+                                    ${s}
+                                </button>
+                            `).join('')}
                         </div>
-                        <div id="total-pages-container" class="md:col-span-1">
-                            <label for="totalPages" class="block text-sm font-bold mb-2 text-neutral-300">Nº de Páginas</label>
-                            <input type="number" id="totalPages" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.totalPages || book.pages || ''}">
-                        </div>
-                        <div id="total-time-container" class="hidden md:col-span-1">
-                            <label for="totalTime" class="block text-sm font-bold mb-2 text-neutral-300">Tempo Total (HH:MM:SS)</label>
-                            <input type="text" id="totalTime" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.totalTime || ''}" placeholder="01:30:00">
+                        <input type="hidden" id="feelingsValue" value="${selectedFeelings.join(',') || ''}">
+                    </div>
+
+                    <div class="card-expressive p-6">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                             <div>
+                                <label for="status" class="block text-sm font-bold mb-2 text-neutral-300">Status</label>
+                                <select id="status" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0">
+                                    <option value="quero-ler" ${book.status === 'quero-ler' ? 'selected' : ''}>Quero Ler</option>
+                                    <option value="lendo" ${book.status === 'lendo' ? 'selected' : ''}>Lendo Agora</option>
+                                    <option value="lido" ${book.status === 'lido' ? 'selected' : ''}>Lido</option>
+                                    <option value="abandonado" ${book.status === 'abandonado' ? 'selected' : ''}>Abandonado</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-bold mb-2 text-neutral-300">Avaliação & Favorito</label>
+                                <div class="flex items-center gap-4">
+                                    <div id="rating" class="flex items-center gap-1">
+                                        ${[1, 2, 3, 4, 5].map(i => `<span class="material-symbols-outlined star-icon !text-3xl cursor-pointer transition-colors ${Number(book.rating) >= i ? 'filled text-amber-400' : 'text-neutral-600'}" data-value="${i}">star</span>`).join('')}
+                                    </div>
+                                    <input type="hidden" id="ratingValue" value="${book.rating || 0}">
+                                    <button type="button" id="favorite-btn" class="text-neutral-500 hover:text-red-500 transition-colors">
+                                        <span class="material-symbols-outlined !text-3xl ${book.favorite ? 'filled text-red-500' : ''}">favorite</span>
+                                    </button>
+                                    <input type="hidden" id="favoriteValue" value="${book.favorite ? 'true' : 'false'}">
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label for="startDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Início</label>
+                                <input type="date" id="startDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.startDate || ''}">
+                            </div>
+                            <div>
+                                <label for="endDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Conclusão</label>
+                                <input type="date" id="endDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.endDate || ''}">
+                            </div>
+
+                            <div class="md:col-span-2 grid grid-cols-3 gap-4">
+                                <label for="media-type-fisico" class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] has-[:checked]:text-[hsl(var(--md-sys-color-on-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]">
+                                    <span class="material-symbols-outlined mb-1">auto_stories</span>
+                                    <span class="block text-sm font-bold">Físico</span>
+                                    <input type="radio" name="mediaType" id="media-type-fisico" value="fisico" ${!book.mediaType || book.mediaType === 'fisico' ? 'checked' : ''} class="sr-only">
+                                </label>
+                                 <label for="media-type-digital" class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] has-[:checked]:text-[hsl(var(--md-sys-color-on-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]">
+                                     <span class="material-symbols-outlined mb-1">tablet_mac</span>
+                                     <span class="block text-sm font-bold">Digital</span>
+                                    <input type="radio" name="mediaType" id="media-type-digital" value="digital" ${book.mediaType === 'digital' ? 'checked' : ''} class="sr-only">
+                                </label>
+                                 <label for="media-type-audiobook" class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] has-[:checked]:text-[hsl(var(--md-sys-color-on-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]">
+                                     <span class="material-symbols-outlined mb-1">headphones</span>
+                                     <span class="block text-sm font-bold">Audiolivro</span>
+                                    <input type="radio" name="mediaType" id="media-type-audiobook" value="audiobook" ${book.mediaType === 'audiobook' ? 'checked' : ''} class="sr-only">
+                                </label>
+                            </div>
+                            <div id="total-pages-container" class="md:col-span-1">
+                                <label for="totalPages" class="block text-sm font-bold mb-2 text-neutral-300">Nº de Páginas</label>
+                                <input type="number" id="totalPages" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.totalPages || book.pages || ''}">
+                            </div>
+                            <div id="total-time-container" class="hidden md:col-span-1">
+                                <label for="totalTime" class="block text-sm font-bold mb-2 text-neutral-300">Tempo Total (HH:MM:SS)</label>
+                                <input type="text" id="totalTime" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.totalTime || ''}" placeholder="01:30:00">
+                            </div>
                         </div>
                     </div>
-                </div>
-                
-                <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label for="synopsis" class="block text-sm font-bold mb-2 text-neutral-300">Sinopse</label>
-                         <textarea id="synopsis" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.synopsis || ''}</textarea>
+                    
+                    <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="synopsis" class="block text-sm font-bold mb-2 text-neutral-300">Sinopse</label>
+                             <textarea id="synopsis" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.synopsis || ''}</textarea>
+                        </div>
+                        <div>
+                            <label for="review" class="block text-sm font-bold mb-2 text-neutral-300">Minha Resenha</label>
+                            <textarea id="review" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.review || ''}</textarea>
+                        </div>
+                        <div class="md:col-span-2">
+                           <label for="categories" class="block text-sm font-bold mb-2 text-neutral-300">Categorias (separadas por vírgula)</label>
+                           <input type="text" id="categories" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.categories || ''}">
+                       </div>
                     </div>
-                    <div>
-                        <label for="review" class="block text-sm font-bold mb-2 text-neutral-300">Minha Resenha</label>
-                        <textarea id="review" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.review || ''}</textarea>
+                    
+                    <div class="flex items-center justify-end gap-4 pt-4">
+                         <button type="button" class="btn-expressive btn-text" id="form-cancel-btn">Cancelar</button>
+                        <button type="submit" class="btn-expressive btn-primary">
+                            <span class="material-symbols-outlined mr-2">save</span> ${isEditing ? 'Salvar Alterações' : 'Adicionar Livro'}
+                        </button>
                     </div>
-                    <div class="md:col-span-2">
-                       <label for="categories" class="block text-sm font-bold mb-2 text-neutral-300">Categorias (separadas por vírgula)</label>
-                       <input type="text" id="categories" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.categories || ''}">
-                   </div>
-                </div>
-                
-                <div class="flex items-center justify-end gap-4 pt-4">
-                     <a href="${isEditing ? `#/book/${bookId}` : '#/estante'}" class="btn-expressive btn-text">Cancelar</a>
-                    <button type="submit" class="btn-expressive btn-primary">
-                        <span class="material-symbols-outlined mr-2">save</span> ${isEditing ? 'Salvar Alterações' : 'Adicionar Livro'}
-                    </button>
-                </div>
-            </form>
+                </form>
+            </div>
         </div>
     `;
 
-    setupFormListeners();
+    modalContent.innerHTML = formHtml;
+    modalContainer.classList.remove('hidden');
+
+    // Adiciona listener para fechar o modal, mas impede que o clique no conteúdo o feche
+    document.getElementById('modal-close-btn').onclick = hideModal;
+    modalContainer.onclick = hideModal;
+    modalContent.firstElementChild.onclick = (e) => e.stopPropagation();
+
+    setupFormListeners(modalContent);
+    document.addEventListener('keydown', handleEscKey);
 }
 
-function setupFormListeners() {
+function setupFormListeners(container = document) {
     // Rating stars logic
-    const stars = document.querySelectorAll('.star-icon');
+    const stars = container.querySelectorAll('.star-icon');
     stars.forEach(star => {
         star.onclick = () => {
             const rating = star.dataset.value;
-            document.getElementById('ratingValue').value = rating;
+            container.getElementById('ratingValue').value = rating;
             stars.forEach(s => {
                 s.classList.toggle('filled', s.dataset.value <= rating);
                 s.classList.toggle('text-amber-400', s.dataset.value <= rating);
@@ -991,8 +1016,8 @@ function setupFormListeners() {
     });
 
     // Favorite button logic
-    const favBtn = document.getElementById('favorite-btn');
-    const favValueInput = document.getElementById('favoriteValue');
+    const favBtn = container.querySelector('#favorite-btn');
+    const favValueInput = container.querySelector('#favoriteValue');
     favBtn.onclick = () => {
         const isFavorite = favValueInput.value === 'true';
         favValueInput.value = !isFavorite;
@@ -1001,12 +1026,12 @@ function setupFormListeners() {
     };
 
     // Media type toggle logic
-    const mediaTypeRadios = document.querySelectorAll('input[name="mediaType"]');
-    const pagesContainer = document.getElementById('total-pages-container');
-    const timeContainer = document.getElementById('total-time-container');
+    const mediaTypeRadios = container.querySelectorAll('input[name="mediaType"]');
+    const pagesContainer = container.querySelector('#total-pages-container');
+    const timeContainer = container.querySelector('#total-time-container');
 
     function toggleMediaFields() {
-        const selectedType = document.querySelector('input[name="mediaType"]:checked').value;
+        const selectedType = container.querySelector('input[name="mediaType"]:checked').value;
         if (selectedType === 'audiobook') {
             pagesContainer.classList.add('hidden');
             timeContainer.classList.remove('hidden');
@@ -1021,8 +1046,8 @@ function setupFormListeners() {
     toggleMediaFields();
 
     // Feelings/Moods selection logic
-    const feelingsContainer = document.getElementById('feelings-container');
-    const feelingsValueInput = document.getElementById('feelingsValue');
+    const feelingsContainer = container.querySelector('#feelings-container');
+    const feelingsValueInput = container.querySelector('#feelingsValue');
     if (feelingsContainer) {
         feelingsContainer.addEventListener('click', (e) => {
             if (e.target.matches('.mood-tag-btn')) {
@@ -1051,43 +1076,41 @@ function setupFormListeners() {
 
 
     // Form submission logic
-    document.getElementById('book-form').onsubmit = async (e) => {
+    container.querySelector('#book-form').onsubmit = async (e) => {
         e.preventDefault();
-        const bookId = document.getElementById('bookId').value || null;
+        const bookId = container.querySelector('#bookId').value || null;
 
         const bookData = {
             id: bookId,
-            title: document.getElementById('title').value,
-            author: document.getElementById('author').value,
-            status: document.getElementById('status').value,
-            rating: Number(document.getElementById('ratingValue').value) || 0,
-            startDate: document.getElementById('startDate').value,
-            endDate: document.getElementById('endDate').value,
-            isbn: document.getElementById('isbn').value,
-            coverUrl: document.getElementById('coverUrl').value,
-            synopsis: document.getElementById('synopsis').value,
-            review: document.getElementById('review').value,
-            categories: document.getElementById('categories').value,
-            favorite: document.getElementById('favoriteValue').value === 'true',
-            mediaType: document.querySelector('input[name="mediaType"]:checked').value,
-            totalPages: Number(document.getElementById('totalPages').value) || 0,
-            totalTime: document.getElementById('totalTime').value || '',
-            feelings: document.getElementById('feelingsValue').value ? document.getElementById('feelingsValue').value.split(',').filter(f => f) : [],
+            title: container.querySelector('#title').value,
+            author: container.querySelector('#author').value,
+            status: container.querySelector('#status').value,
+            rating: Number(container.querySelector('#ratingValue').value) || 0,
+            startDate: container.querySelector('#startDate').value,
+            endDate: container.querySelector('#endDate').value,
+            isbn: container.querySelector('#isbn').value,
+            coverUrl: container.querySelector('#coverUrl').value,
+            synopsis: container.querySelector('#synopsis').value,
+            review: container.querySelector('#review').value,
+            categories: container.querySelector('#categories').value,
+            favorite: container.querySelector('#favoriteValue').value === 'true',
+            mediaType: container.querySelector('input[name="mediaType"]:checked').value,
+            totalPages: Number(container.querySelector('#totalPages').value) || 0,
+            totalTime: container.querySelector('#totalTime').value || '',
+            feelings: container.querySelector('#feelingsValue').value ? container.querySelector('#feelingsValue').value.split(',').filter(f => f) : [],
         };
 
         showLoading("Salvando...");
         const savedBookId = await saveBook(bookData);
-        hideModal();
-        if (savedBookId) {
-            window.location.hash = `#/estante`;
-        }
+        hideModal(); // Fecha o modal do formulário
     };
 
-    document.getElementById('metadata-search-btn').onclick = handleMetadataSearch;
+    container.querySelector('#metadata-search-btn').onclick = () => handleMetadataSearch(container);
 }
 
-async function renderDetails(bookId) {
-    const page = document.getElementById('page-details');
+async function renderDetailsInModal(bookId) {
+    const modalContainer = document.getElementById('modal-container');
+    const modalContent = document.getElementById('modal-content');
     let book = allBooks.find(b => b.id === bookId);
 
     if (!book && userId && bookId) {
@@ -1104,7 +1127,8 @@ async function renderDetails(bookId) {
 
 
     if (!book) {
-        page.innerHTML = `<div class="text-center py-20"><h1 class="text-2xl font-bold">Livro não encontrado</h1><a href="#/estante" class="btn-expressive btn-primary mt-6">Voltar</a></div>`;
+        showModal('Erro', 'Livro não encontrado.');
+        window.location.hash = '#/estante';
         return;
     }
 
@@ -1123,57 +1147,57 @@ async function renderDetails(bookId) {
     }
 
     const feelingsHtml = book.feelings && book.feelings.length > 0
-        ? `<div class="card-expressive p-6">
-               <h3 class="text-xl font-bold mb-4">Como este livro me fez sentir</h3>
-               <div class="flex flex-wrap gap-2">
-                   ${book.feelings.map(f => `<span class="mood-tag-pill text-sm font-bold px-3 py-1 rounded-full capitalize">${f}</span>`).join('')}
-               </div>
-           </div>`
+        ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Como este livro me fez sentir</h3><div class="flex flex-wrap gap-2">${book.feelings.map(f => `<span class="mood-tag-pill text-sm font-bold px-3 py-1 rounded-full capitalize">${f}</span>`).join('')}</div></div>`
         : '';
 
-    page.innerHTML = `
-        <div class="max-w-4xl mx-auto">
-            <a href="#/estante" class="btn-expressive btn-text mb-6">
-                <span class="material-symbols-outlined mr-2">arrow_back</span> Voltar para Estante
-            </a>
-        
-            <div class="flex flex-col md:flex-row gap-4 md:gap-8 mb-8">
-                <div class="w-1/2 md:w-1/3 mx-auto flex-shrink-0">
-                    <img src="${book.coverUrl || 'https://placehold.co/400x600/171717/FFFFFF?text=Sem+Capa'}" alt="Capa de ${book.title}" class="w-full rounded-2xl shadow-2xl" onerror="this.onerror=null;this.src='https://placehold.co/400x600/171717/FFFFFF?text=Capa+Inv%C3%A1lida';">
-                </div>
-                <div class="w-full md:w-2/3 flex flex-col">
-                    <h1 class="font-display text-2xl md:text-4xl lg:text-5xl mb-2">${book.title}</h1>
-                    <h2 class="text-lg md:text-2xl text-neutral-300 mb-4">${book.author}</h2>
-                    <div class="flex items-center gap-2 mb-6">${ratingHtml}</div>
-                    
-                    <div class="flex flex-wrap gap-2 text-sm mb-6">
-                        <span class="bg-neutral-800 text-neutral-300 font-bold py-1 px-3 rounded-full">${statusDisplay}</span>
-                        <span class="bg-neutral-800 text-neutral-300 font-bold py-1 px-3 rounded-full">${totalDisplay}</span>
+    const detailHTML = `
+        <div class="card-expressive w-full max-w-5xl max-h-[90vh] flex flex-col relative">
+            <button id="modal-close-btn" class="absolute top-4 right-5 text-neutral-400 hover:text-white text-4xl leading-none z-10">&times;</button>
+            <div class="p-6 md:p-8 flex-grow overflow-y-auto">
+                <div class="flex flex-col sm:flex-row gap-8 md:gap-12">
+                    <div class="w-1/3 sm:w-1/5 mx-auto flex-shrink-0">
+                        <img src="${book.coverUrl || 'https://placehold.co/400x600/171717/FFFFFF?text=Sem+Capa'}" alt="Capa de ${book.title}" class="w-full rounded-2xl shadow-2xl" onerror="this.onerror=null;this.src='https://placehold.co/400x600/171717/FFFFFF?text=Capa+Inv%C3%A1lida';">
                     </div>
-                    
-                     <div class="flex flex-wrap gap-2 mb-8">${book.categories ? book.categories.split(',').map(cat => `<span class="bg-[hsla(var(--md-sys-color-primary),0.2)] text-[hsl(var(--md-sys-color-primary))] text-xs font-bold mr-2 px-2.5 py-1 rounded-full">${cat.trim()}</span>`).join('') : ''}</div>
-                     <div class="mt-auto flex flex-col sm:flex-row gap-4">
-                        <a href="#/edit/${book.id}" class="btn-expressive btn-primary flex-1 !h-11 !text-sm"><span class="material-symbols-outlined mr-2">edit</span> Editar</a>
-                        <button id="delete-book-btn" class="btn-expressive !h-11 !text-sm bg-red-900/60 text-red-300 hover:bg-red-800"><span class="material-symbols-outlined">delete</span></button>
+                    <div class="w-full sm:w-2/3 flex flex-col">
+                        <h1 class="font-display text-3xl md:text-5xl lg:text-6xl mb-2">${book.title}</h1>
+                        <h2 class="text-xl md:text-3xl text-neutral-300 mb-6">${book.author}</h2>
+                        <div class="flex items-center gap-2 mb-6">${ratingHtml}</div>
+                        <div class="flex flex-wrap gap-2 text-sm mb-6">
+                            <span class="bg-neutral-800 text-neutral-300 font-bold py-1 px-3 rounded-full">${statusDisplay}</span>
+                            <span class="bg-neutral-800 text-neutral-300 font-bold py-1 px-3 rounded-full">${totalDisplay}</span>
+                        </div>
+                         <div class="flex flex-wrap gap-2 mb-8">${book.categories ? book.categories.split(',').map(cat => `<span class="bg-[hsla(var(--md-sys-color-primary),0.2)] text-[hsl(var(--md-sys-color-primary))] text-xs font-bold mr-2 px-2.5 py-1 rounded-full">${cat.trim()}</span>`).join('') : ''}</div>
+                         <div class="mt-auto flex flex-col sm:flex-row gap-4">
+                            <a href="#/edit/${book.id}" class="btn-expressive btn-primary flex-1 !h-11 !text-sm"><span class="material-symbols-outlined mr-2">edit</span> Editar</a>
+                            <button id="delete-book-btn" class="btn-expressive !h-11 !text-sm bg-red-900/60 text-red-300 hover:bg-red-800"><span class="material-symbols-outlined">delete</span></button>
+                        </div>
                     </div>
                 </div>
-            </div>
-            
-            ${book.status === 'lendo' ? renderProgressUpdater(book) : ''}
-
-            <div class="space-y-8">
-                 ${book.synopsis ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Sinopse</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.synopsis}</p></div>` : ''}
-                 ${book.review ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Minha Resenha</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.review}</p></div>` : ''}
-                 ${feelingsHtml}
+                
+                <div class="mt-8 space-y-6">
+                    ${book.status === 'lendo' ? renderProgressUpdater(book) : ''}
+                     ${book.synopsis ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Sinopse</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.synopsis}</p></div>` : ''}
+                     ${book.review ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Minha Resenha</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.review}</p></div>` : ''}
+                     ${feelingsHtml}
+                </div>
             </div>
         </div>
     `;
 
-    document.getElementById('delete-book-btn').onclick = () => showModal('Confirmar Exclusão', `Tem certeza que deseja excluir o livro "<strong>${book.title}</strong>"? Esta ação não pode ser desfeita.`, [{ id: 'confirm-delete-btn', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteBook(book.id) }]);
+    modalContent.innerHTML = detailHTML;
+    modalContainer.classList.remove('hidden');
+
+    // Adiciona funcionalidade aos botões dentro do modal
+    modalContent.querySelector('#modal-close-btn').onclick = hideModal;
+    modalContainer.onclick = hideModal;
+    modalContent.firstElementChild.onclick = (e) => e.stopPropagation();
+
+
+    modalContent.querySelector('#delete-book-btn').onclick = () => showModal('Confirmar Exclusão', `Tem certeza que deseja excluir o livro "<strong>${book.title}</strong>"? Esta ação não pode ser desfeita.`, [{ id: 'confirm-delete-btn', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteBook(book.id) }]);
 
     if (book.status === 'lendo') {
-        document.getElementById('update-progress-btn').onclick = () => {
-            const progressInput = document.getElementById('progress-input');
+        modalContent.querySelector('#update-progress-btn').onclick = () => {
+            const progressInput = modalContent.querySelector('#progress-input');
             let progressValue = progressInput.value;
             if (book.mediaType === 'audiobook') {
                 const parts = progressValue.split(':');
@@ -1181,7 +1205,7 @@ async function renderDetails(bookId) {
             }
             updateBookProgress(book.id, Number(progressValue));
         }
-        const progressInput = document.getElementById('progress-input');
+        const progressInput = modalContent.querySelector('#progress-input');
         progressInput.oninput = () => {
             let isComplete = false;
             const bookType = book.mediaType || 'fisico';
@@ -1200,10 +1224,11 @@ async function renderDetails(bookId) {
                     }
                 }
             }
-            document.getElementById('mark-as-read-btn').classList.toggle('hidden', !isComplete);
+            modalContent.querySelector('#mark-as-read-btn').classList.toggle('hidden', !isComplete);
         };
-        document.getElementById('mark-as-read-btn').onclick = () => markBookAsRead(book.id);
+        modalContent.querySelector('#mark-as-read-btn').onclick = () => markBookAsRead(book.id);
     }
+    document.addEventListener('keydown', handleEscKey);
 }
 
 function renderProgressUpdater(book) {
@@ -1247,8 +1272,8 @@ function renderProgressUpdater(book) {
 
 // --- FUNÇÕES DA GOOGLE BOOKS API ---
 
-async function handleMetadataSearch() {
-    const title = document.getElementById('title').value;
+async function handleMetadataSearch(container = document) {
+    const title = container.querySelector('#title').value;
     if (!title) {
         showModal("Falta o Título", "Por favor, insira um título de livro para buscar os dados.", []);
         return;
@@ -1313,6 +1338,8 @@ function showApiResultsModal() {
         { id: 'select-book-btn', text: '<span class="material-symbols-outlined !text-base mr-2">done</span>É essa!', class: 'btn-primary', onClick: selectApiBook },
     ];
 
+    // Re-usa o showModal genérico, mas ele será sobreposto pelo modal do formulário se a busca for de lá.
+    // O ideal seria um sistema de modal mais robusto, mas isso funciona por agora.
     showModal(`Resultados da Busca`, content, actions);
 
     document.getElementById('prev-book-btn').disabled = currentApiResultIndex === 0;
@@ -1337,23 +1364,28 @@ function showPrevApiBook() {
 }
 
 function selectApiBook() {
+    // O container do formulário é o modalContent quando o formulário está aberto
+    const container = document.getElementById('modal-content');
     const book = apiSearchResults[currentApiResultIndex].volumeInfo;
-    document.getElementById('title').value = book.title || '';
-    document.getElementById('author').value = book.authors ? book.authors.join(', ') : '';
-    document.getElementById('synopsis').value = book.description || '';
-    document.getElementById('totalPages').value = book.pageCount || '';
-    document.getElementById('isbn').value = book.industryIdentifiers?.find(i => i.type === "ISBN_13")?.identifier || '';
-    const coverUrl = book.imageLinks?.thumbnail || '';
-    document.getElementById('coverUrl').value = coverUrl;
 
-    const previewContainer = document.getElementById('cover-preview-container');
+    container.querySelector('#title').value = book.title || '';
+    container.querySelector('#author').value = book.authors ? book.authors.join(', ') : '';
+    container.querySelector('#synopsis').value = book.description || '';
+    container.querySelector('#totalPages').value = book.pageCount || '';
+    container.querySelector('#isbn').value = book.industryIdentifiers?.find(i => i.type === "ISBN_13")?.identifier || '';
+    const coverUrl = book.imageLinks?.thumbnail || '';
+    container.querySelector('#coverUrl').value = coverUrl;
+
+    const previewContainer = container.querySelector('#cover-preview-container');
     if (coverUrl) {
         previewContainer.innerHTML = `<img src="${coverUrl}" class="w-32 mx-auto rounded-lg shadow-md">`;
     } else {
         previewContainer.innerHTML = '';
     }
 
-    hideModal();
+    // Não fecha o modal principal, apenas o de resultados (que na verdade é o mesmo)
+    // O usuário vê a atualização e pode continuar editando o form.
+    renderFormInModal(container.querySelector('#bookId').value);
 }
 
 
