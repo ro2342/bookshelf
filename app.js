@@ -31,6 +31,14 @@ let itemsPerPage = 10;
 let apiSearchResults = [];
 let currentApiResultIndex = 0;
 let shelfSearchTerm = '';
+let shelfPaginationState = {}; // Armazena o estado da paginação de cada estante
+
+const fixedShelves = [
+    { id: 'lendo', name: 'Lendo Agora' },
+    { id: 'lido', name: 'Lidos' },
+    { id: 'quero-ler', name: 'Quero Ler' },
+    { id: 'abandonado', name: 'Abandonados' }
+];
 
 // Array de sentimentos para a nova funcionalidade
 const sentimentos = [
@@ -57,6 +65,18 @@ const themes = {
     'ttpd': { name: 'The Tortured Poets Department', values: { primary: '30 20% 80%', onPrimary: '30 20% 10%', primaryContainer: '30 15% 25%', onPrimaryContainer: '30 20% 90%', surface: '30 5% 8%', onSurface: '30 5% 90%', surfaceContainerHigh: '30 5% 12%', onSurfaceVariant: '30 5% 65%', outline: '30 5% 35%' } }
 };
 const themeOrder = ['dark', 'sunset', 'forest', 'nonbinary_pride', 'taylor_swift', 'fearless', 'speak_now', 'red', '1989', 'reputation', 'lover', 'folklore', 'evermore', 'midnights', 'ttpd'];
+
+// Paleta de cores para os placeholders
+const placeholderColors = [
+    { bg: '455A64', fg: 'FFFFFF' }, { bg: '004D40', fg: 'FFFFFF' }, { bg: '827717', fg: 'FFFFFF' },
+    { bg: '3E2723', fg: 'FFFFFF' }, { bg: 'BF360C', fg: 'FFFFFF' }, { bg: '0D47A1', fg: 'FFFFFF' },
+    { bg: '4A148C', fg: 'FFFFFF' }, { bg: '880E4F', fg: 'FFFFFF' }, { bg: '263238', fg: 'FFFFFF' }
+];
+
+const style = document.createElement('style');
+style.innerHTML = `@media (min-width: 768px) { .pag-hidden { display: none !important; } }`;
+document.head.appendChild(style);
+
 
 function applyTheme(themeName, saveToDb = true) {
     const theme = themes[themeName];
@@ -225,11 +245,11 @@ function listenToBooks() {
 
     const booksCollection = collection(db, "users", userId, "books");
     booksUnsubscribe = onSnapshot(booksCollection, (snapshot) => {
-        allBooks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), addedAt: doc.data().addedAt?.toDate() || new Date(0) })).sort((a, b) => b.addedAt - a.addedAt);
+        allBooks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), addedAt: doc.data().addedAt?.toDate() || new Date(0) }));
         router();
     }, (error) => {
         console.error("Erro ao ouvir livros:", error);
-        showModal("Erro de Sincronização", `Houve um problema ao sincronizar seus livros. Erro: ${error.code}`);
+        showModal("Erro de Sincronização", `Houve um problema ao sincronizar os seus livros. Erro: ${error.code}`);
     });
 }
 
@@ -239,7 +259,19 @@ function listenToShelves() {
 
     const shelvesCollection = collection(db, "users", userId, "shelves");
     shelvesUnsubscribe = onSnapshot(shelvesCollection, (snapshot) => {
-        userShelves = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => a.name.localeCompare(b.name));
+        let shelves = snapshot.docs.map((doc, index) => ({ id: doc.id, ...doc.data(), order: doc.data().order ?? index }));
+
+        const shelvesToUpdate = shelves.filter(s => s.order === undefined);
+        if (shelvesToUpdate.length > 0) {
+            const batch = writeBatch(db);
+            shelvesToUpdate.forEach((shelf, index) => {
+                const shelfRef = doc(db, "users", userId, "shelves", shelf.id);
+                batch.update(shelfRef, { order: userShelves.length + index });
+            });
+            batch.commit();
+        }
+
+        userShelves = shelves.sort((a, b) => a.order - b.order);
         router();
     }, (error) => {
         console.error("Erro ao ouvir estantes:", error);
@@ -269,14 +301,13 @@ async function saveData(collectionName, data, docId = null) {
         showModal("Erro", "Utilizador não autenticado. Não é possível salvar.");
         return null;
     }
-    const basePath = collection(db, "users", userId, collectionName);
+    const collectionRef = collection(db, "users", userId, collectionName);
     try {
         if (docId) {
-            await updateDoc(doc(basePath, docId), data);
+            await setDoc(doc(collectionRef, docId), data, { merge: true });
             return docId;
         } else {
-            const docRef = doc(collection(db, "users", userId, collectionName));
-            await setDoc(docRef, data);
+            const docRef = await addDoc(collectionRef, data);
             return docRef.id;
         }
     } catch (error) {
@@ -286,21 +317,69 @@ async function saveData(collectionName, data, docId = null) {
     }
 }
 
-
 async function saveBook(bookData) {
     const docId = bookData.id || null;
     let dataToSave = { ...bookData };
     delete dataToSave.id;
-    if (!docId) dataToSave.addedAt = new Date();
+
+    if (docId) {
+        const originalBook = allBooks.find(b => b.id === docId);
+        const previousStatus = originalBook?.status;
+        const newStatus = dataToSave.status;
+
+        if (previousStatus && newStatus && previousStatus !== newStatus) {
+            const profileUpdate = {};
+            const oldOrderKey = `${previousStatus}Order`;
+            if (userProfile[oldOrderKey]) {
+                profileUpdate[oldOrderKey] = userProfile[oldOrderKey].filter(id => id !== docId);
+            }
+
+            const newOrderKey = `${newStatus}Order`;
+            const newOrderArray = userProfile[newOrderKey] || [];
+            if (!newOrderArray.includes(docId)) {
+                profileUpdate[newOrderKey] = [docId, ...newOrderArray];
+            }
+
+            await saveProfile(profileUpdate, false);
+        }
+    }
+
+    if (!docId) {
+        dataToSave.addedAt = new Date();
+        if (!dataToSave.coverUrl) {
+            dataToSave.placeholderColor = placeholderColors[Math.floor(Math.random() * placeholderColors.length)];
+        }
+    }
     dataToSave.shelves = dataToSave.shelves || [];
-    return await saveData('books', dataToSave, docId);
+
+    const savedBookId = await saveData('books', dataToSave, docId);
+
+    if (!docId && savedBookId && dataToSave.status) {
+        const statusOrderKey = `${dataToSave.status}Order`;
+        const profileDoc = await getDoc(doc(db, "users", userId, "profile", "data"));
+        const latestProfile = profileDoc.exists() ? profileDoc.data() : {};
+        const currentOrder = latestProfile[statusOrderKey] || [];
+
+        if (!currentOrder.includes(savedBookId)) {
+            const newOrder = [savedBookId, ...currentOrder];
+            await saveProfile({ [statusOrderKey]: newOrder }, false);
+        }
+    }
+
+    return savedBookId;
 }
 
 async function saveShelf(shelfData) {
     const docId = shelfData.id || null;
     let dataToSave = { ...shelfData };
     delete dataToSave.id;
-    if (!docId) dataToSave.createdAt = new Date();
+
+    if (!docId) {
+        dataToSave.createdAt = new Date();
+        dataToSave.order = userShelves.length;
+        dataToSave.bookOrder = [];
+    }
+
     return await saveData('shelves', dataToSave, docId);
 }
 
@@ -313,20 +392,52 @@ async function saveProfile(profileData, showModals = true) {
         await setDoc(profileDocRef, profileData, { merge: true });
         if (showModals) {
             hideModal();
-            showModal("Sucesso!", "Seu perfil foi atualizado.", []);
         }
     } catch (error) {
         if (showModals) hideModal();
-        showModal("Erro", `Não foi possível salvar seu perfil: ${error.message}`);
+        showModal("Erro", `Não foi possível salvar o seu perfil: ${error.message}`);
         console.error("Erro ao salvar perfil:", error);
     }
 }
+
+async function saveShelvesOrder(orderedIds) {
+    if (!userId) return;
+    const batch = writeBatch(db);
+    orderedIds.forEach((id, index) => {
+        const shelfRef = doc(db, "users", userId, "shelves", id);
+        batch.update(shelfRef, { order: index });
+    });
+    try {
+        await batch.commit();
+    } catch (error) {
+        console.error("Erro ao salvar ordem das estantes:", error);
+        showModal("Erro", "Não foi possível salvar a nova ordem das estantes.");
+    }
+}
+
+async function saveBookOrder(shelfId, orderedBookIds) {
+    if (!userId) return;
+
+    try {
+        if (['lido', 'lendo', 'quero-ler', 'abandonado'].includes(shelfId)) {
+            const fieldToUpdate = `${shelfId}Order`;
+            await saveProfile({ [fieldToUpdate]: orderedBookIds }, false);
+        } else {
+            const shelfRef = doc(db, "users", userId, "shelves", shelfId);
+            await updateDoc(shelfRef, { bookOrder: orderedBookIds });
+        }
+    } catch (error) {
+        console.error(`Erro ao salvar ordem dos livros para estante ${shelfId}:`, error);
+        showModal("Erro", "Não foi possível salvar a nova ordem dos livros.");
+    }
+}
+
 
 async function deleteAllBooks() {
     if (!userId) return;
     showModal(
         'Confirmar Exclusão Total',
-        `Tem certeza que deseja excluir <strong>TODOS</strong> os seus livros? Esta ação não pode ser desfeita.`,
+        `Tem a certeza que deseja excluir <strong>TODOS</strong> os seus livros? Esta ação não pode ser desfeita.`,
         [{
             id: 'confirm-delete-all-btn', text: 'Sim, Excluir Tudo', class: 'bg-red-600 text-white', onClick: async () => {
                 showLoading("A apagar todos os livros...");
@@ -388,6 +499,9 @@ async function addBooksToShelf(shelfId, bookIds) {
         const shelf = userShelves.find(s => s.id === shelfId);
         if (!shelf) throw new Error("Estante não encontrada.");
 
+        const newBookOrder = [...(shelf.bookOrder || []), ...bookIds.filter(id => !(shelf.bookOrder || []).includes(id))];
+        batch.update(doc(db, "users", userId, "shelves", shelfId), { bookOrder: newBookOrder });
+
         bookIds.forEach(bookId => {
             const bookRef = doc(db, "users", userId, "books", bookId);
             const book = allBooks.find(b => b.id === bookId);
@@ -410,18 +524,17 @@ async function addBooksToShelf(shelfId, bookIds) {
 async function removeBookFromShelf(bookId, shelfId) {
     if (!userId || !bookId || !shelfId) return;
 
+    const shelf = userShelves.find(s => s.id === shelfId);
+    if (shelf) {
+        const newBookOrder = (shelf.bookOrder || []).filter(id => id !== bookId);
+        await updateDoc(doc(db, "users", userId, "shelves", shelfId), { bookOrder: newBookOrder });
+    }
+
     const book = allBooks.find(b => b.id === bookId);
-    if (!book || !book.shelves) return;
-
-    const updatedShelves = book.shelves.filter(sId => sId !== shelfId);
-    const bookRef = doc(db, "users", userId, "books", bookId);
-
-    try {
+    if (book && book.shelves) {
+        const updatedShelves = book.shelves.filter(sId => sId !== shelfId);
+        const bookRef = doc(db, "users", userId, "books", bookId);
         await updateDoc(bookRef, { shelves: updatedShelves });
-        // The UI will update automatically via the onSnapshot listener.
-    } catch (error) {
-        console.error("Erro ao remover livro da estante:", error);
-        showModal("Erro", `Não foi possível remover o livro: ${error.message}`);
     }
 }
 
@@ -430,8 +543,9 @@ function getCoverUrl(book, width = 200, height = 300) {
     if (book.coverUrl && !book.coverUrl.includes('placehold.co')) {
         return book.coverUrl;
     }
+    const color = book.placeholderColor || placeholderColors[Math.floor(Math.random() * placeholderColors.length)];
     const titleText = book.title ? book.title.split(' ').slice(0, 3).join(' ') : 'Sem Título';
-    return `https://placehold.co/${width}x${height}/1a1a1a/ffffff?text=${encodeURIComponent(titleText)}`;
+    return `https://placehold.co/${width}x${height}/${color.bg}/${color.fg}?text=${encodeURIComponent(titleText)}`;
 }
 
 
@@ -454,6 +568,10 @@ function router() {
 
     const currentHash = window.location.hash || '#/estantes';
     const [path, param] = currentHash.substring(2).split('/');
+
+    if (path !== 'estantes') {
+        shelfPaginationState = {};
+    }
 
     const modalRoutes = { 'book': renderDetailsInModal, 'add': renderFormInModal, 'edit': renderFormInModal };
 
@@ -517,32 +635,79 @@ function getPageHeader(title) {
         <div class="flex items-center gap-4 mb-8">
             <img src="${avatarUrl}" alt="Avatar do utilizador" class="w-16 h-16 rounded-full object-cover shadow-lg">
             <div>
-                <p class="text-xl text-neutral-300">Oi, <span class="font-bold text-white">${displayName}</span>!</p>
+                <p class="text-xl text-neutral-300">Olá, <span class="font-bold text-white">${displayName}</span>!</p>
                 <h1 class="font-display text-5xl md:text-6xl">${title}</h1>
             </div>
         </div>
     `;
 }
 
+function getPaginationButtonsHtml(currentPage, totalPages) {
+    let buttonsHtml = '';
+    if (totalPages <= 1) {
+        return '';
+    }
+
+    buttonsHtml += `<button class="pagination-btn p-2 rounded-lg" ${currentPage === 1 ? 'disabled' : ''} data-page="${currentPage - 1}">&lt;</button>`;
+
+    let pagesToShow = [];
+    if (totalPages <= 5) {
+        for (let i = 1; i <= totalPages; i++) {
+            pagesToShow.push(i);
+        }
+    } else {
+        pagesToShow.push(1);
+        if (currentPage > 3) {
+            pagesToShow.push('...');
+        }
+        let start = Math.max(2, currentPage - 1);
+        let end = Math.min(totalPages - 1, currentPage + 1);
+        for (let i = start; i <= end; i++) {
+            pagesToShow.push(i);
+        }
+        if (currentPage < totalPages - 2) {
+            pagesToShow.push('...');
+        }
+        pagesToShow.push(totalPages);
+    }
+
+    pagesToShow = [...new Set(pagesToShow)];
+
+    pagesToShow.forEach(page => {
+        if (page === '...') {
+            buttonsHtml += `<span class="px-2 flex items-center justify-center">...</span>`;
+        } else {
+            buttonsHtml += `<button class="pagination-btn w-10 h-10 rounded-lg ${page === currentPage ? 'active' : ''}" data-page="${page}">${page}</button>`;
+        }
+    });
+
+    buttonsHtml += `<button class="pagination-btn p-2 rounded-lg" ${currentPage === totalPages ? 'disabled' : ''} data-page="${currentPage + 1}">&gt;</button>`;
+
+    return buttonsHtml;
+}
+
 function renderEstantes() {
     const page = document.getElementById('page-estantes');
+    if (!page) return;
+
     page.innerHTML = `
         <div class="max-w-4xl mx-auto space-y-8">
             ${getPageHeader('Estantes')}
+            
+            <div id="fixed-shelves-list" class="space-y-12">
+                 ${fixedShelves.map(shelf => shelfSection(shelf, false)).join('')}
+            </div>
+
+            <hr class="border-neutral-800 my-12">
+
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <p class="text-neutral-400">Organize suas leituras em coleções personalizadas.</p>
+                <p class="text-neutral-400">Arraste para reordenar as suas estantes personalizadas.</p>
                 <button id="create-shelf-btn" class="btn-expressive btn-primary">
                     <span class="material-symbols-outlined mr-2">add</span> Criar Estante
                 </button>
             </div>
-            <div id="shelves-list" class="space-y-12">
-                ${userShelves.length === 0 ? `
-                    <div class="text-center py-20 card-expressive">
-                        <span class="material-symbols-outlined text-6xl text-neutral-500 mb-4">shelf_auto_hide</span>
-                        <h3 class="text-xl font-bold">Nenhuma estante criada</h3>
-                        <p class="text-neutral-400">Clique em "Criar Estante" para começar a organizar seus livros.</p>
-                    </div>`
-            : userShelves.map(shelf => shelfSection(shelf)).join('')}
+            <div id="custom-shelves-list" class="space-y-12">
+                ${userShelves.map(shelf => shelfSection(shelf, true)).join('')}
             </div>
         </div>
     `;
@@ -560,11 +725,231 @@ function renderEstantes() {
         )
     };
 
+    document.querySelectorAll('.shelf-container').forEach(shelf => {
+        updateShelfPaginationView(shelf.dataset.shelfId, shelfPaginationState[shelf.dataset.shelfId] || 1);
+    });
+
+    initSortable();
+    attachShelfEventListeners();
+}
+
+function getBooksForShelf(shelfId) {
+    const isCustomShelf = userShelves.some(s => s.id === shelfId);
+
+    if (isCustomShelf) {
+        const shelf = userShelves.find(s => s.id === shelfId);
+        const booksInShelf = allBooks.filter(b => b.shelves?.includes(shelfId));
+        const bookOrder = shelf.bookOrder || [];
+        const bookMap = new Map(booksInShelf.map(b => [b.id, b]));
+
+        const orderedBooks = bookOrder.map(id => bookMap.get(id)).filter(Boolean);
+        const orderedBookIds = new Set(orderedBooks.map(b => b.id));
+        const unorderedBooks = booksInShelf.filter(b => !orderedBookIds.has(b.id));
+
+        return [...orderedBooks, ...unorderedBooks];
+    } else {
+        const allBooksInStatus = allBooks.filter(b => b.status === shelfId);
+        const orderKey = `${shelfId}Order`;
+        const bookOrderIds = userProfile[orderKey] || [];
+        const bookMap = new Map(allBooksInStatus.map(b => [b.id, b]));
+
+        const orderedBooks = bookOrderIds.map(id => bookMap.get(id)).filter(Boolean);
+        const orderedBookIdsSet = new Set(orderedBooks.map(b => b.id));
+        const remainingBooks = allBooksInStatus.filter(b => !orderedBookIdsSet.has(b.id));
+
+        return [...orderedBooks, ...remainingBooks];
+    }
+}
+
+
+function shelfSection(shelf, isCustom = false) {
+    const booksOnShelf = getBooksForShelf(shelf.id);
+    const currentPage = shelfPaginationState[shelf.id] || 1;
+    const itemsPerPage = 7;
+    const totalPages = Math.ceil(booksOnShelf.length / itemsPerPage);
+
+    const bookCoversHtml = booksOnShelf.map(book => `
+        <div class="relative group w-28 md:w-full flex-shrink-0 book-item" data-book-id="${book.id}">
+            <a href="#/book/${book.id}" class="block">
+                <img src="${getCoverUrl(book, 400, 600)}" alt="Capa de ${book.title}" class="w-full rounded-md shadow-lg aspect-[2/3] object-cover transition-transform duration-200 group-hover:scale-105 group-hover:shadow-xl">
+            </a>
+            ${isCustom ? `
+            <button data-book-id="${book.id}" data-shelf-id="${shelf.id}" class="remove-from-shelf-btn absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 items-center justify-center shadow-lg hover:bg-red-700 transition-all z-10 hidden group-hover:flex" title="Remover da estante">
+                <span class="material-symbols-outlined !text-base">close</span>
+            </button>` : ''}
+        </div>
+    `).join('');
+
+    const paginationHtml = totalPages > 1 ? `
+        <div class="hidden md:flex justify-center items-center gap-2 mt-4 shelf-pagination" data-shelf-id="${shelf.id}" data-is-custom="${isCustom}">
+           ${getPaginationButtonsHtml(currentPage, totalPages)}
+        </div>
+    ` : '';
+
+    return `
+        <div class="card-expressive p-6 shelf-container" data-shelf-id="${shelf.id}">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h2 class="font-display text-2xl">${shelf.name}</h2>
+                    <p class="text-sm text-neutral-400">${booksOnShelf.length} ${booksOnShelf.length === 1 ? 'livro' : 'livros'}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                     ${isCustom ? `
+                        <button class="add-book-to-shelf-btn btn-expressive !h-10 !w-10 !p-0 !rounded-full btn-tonal" data-shelf-id="${shelf.id}" title="Adicionar livro a esta estante">
+                            <span class="material-symbols-outlined">add</span>
+                        </button>
+                        <button class="delete-shelf-btn text-neutral-500 hover:text-red-500" data-shelf-id="${shelf.id}" title="Apagar estante">
+                            <span class="material-symbols-outlined">delete</span>
+                        </button>`
+            : ''}
+                </div>
+            </div>
+            <div class="book-list-wrapper">
+                <div class="book-list flex gap-4 overflow-x-auto p-4 md:grid md:grid-cols-7 md:overflow-visible" data-shelf-id="${shelf.id}">
+                    ${booksOnShelf.length > 0 ? bookCoversHtml : `<p class="text-neutral-500 md:col-span-7 text-center">${isCustom ? 'Adicione livros a esta estante clicando no botão +.' : 'Nenhum livro com este status.'}</p>`}
+                </div>
+                ${paginationHtml}
+            </div>
+        </div>`;
+}
+
+function initSortable() {
+    const customShelvesList = document.getElementById('custom-shelves-list');
+    if (customShelvesList) {
+        new Sortable(customShelvesList, {
+            animation: 150,
+            handle: '.shelf-container',
+            // **CORREÇÃO**: Adicionadas opções de scroll automático
+            scroll: true,
+            scrollSensitivity: 100,
+            scrollSpeed: 15,
+            onEnd: (evt) => {
+                const orderedIds = Array.from(evt.to.children).map(el => el.dataset.shelfId);
+                saveShelvesOrder(orderedIds);
+            }
+        });
+    }
+
+    document.querySelectorAll('.book-list').forEach(list => {
+        new Sortable(list, {
+            animation: 150,
+            group: 'shared-books',
+            handle: '.book-item',
+            // **CORREÇÃO**: Adicionadas opções de scroll automático
+            scroll: true,
+            scrollSensitivity: 100,
+            scrollSpeed: 15,
+            onEnd: async (evt) => {
+                const bookId = evt.item.dataset.bookId;
+                const toShelfId = evt.to.dataset.shelfId;
+                const fromShelfId = evt.from.dataset.shelfId;
+
+                // **CORREÇÃO**: Mantém o estado da página após o 'drop'
+                const oldPage = shelfPaginationState[fromShelfId] || 1;
+                const newPage = shelfPaginationState[toShelfId] || 1;
+
+                if (fromShelfId === toShelfId) {
+                    const allBookIdsInShelf = getBooksForShelf(toShelfId).map(b => b.id);
+                    const newOrderedIds = Array.from(evt.to.children).map(el => el.dataset.bookId);
+
+                    const itemsPerPage = 7;
+                    const page = shelfPaginationState[toShelfId] || 1;
+                    const startIndex = (page - 1) * itemsPerPage;
+
+                    const visibleIds = new Set(newOrderedIds);
+                    const hiddenIds = allBookIdsInShelf.filter(id => !visibleIds.has(id));
+
+                    const finalOrder = [
+                        ...hiddenIds.slice(0, startIndex),
+                        ...newOrderedIds,
+                        ...hiddenIds.slice(startIndex)
+                    ];
+
+                    await saveBookOrder(toShelfId, finalOrder);
+                    shelfPaginationState[toShelfId] = oldPage; // Mantém a página
+                } else {
+                    evt.from.insertBefore(evt.item, evt.from.children[evt.oldIndex]);
+
+                    const book = allBooks.find(b => b.id === bookId);
+                    if (!book) return;
+
+                    const handleStatusChange = async (newStatus, extraData = {}) => {
+                        await saveBook({ ...book, status: newStatus, ...extraData, id: book.id });
+                        window.location.hash = `#/edit/${book.id}`;
+                    };
+
+                    const toIsCustom = userShelves.some(s => s.id === toShelfId);
+
+                    if (!toIsCustom) {
+                        if (toShelfId === 'lendo' && book.status !== 'lendo') {
+                            showModal('Iniciar Leitura?', `Deseja registar o início da leitura de "${book.title}"?`, [
+                                { id: 'confirm-start-reading', text: 'Sim', class: 'btn-primary', onClick: () => handleStatusChange('lendo') }
+                            ]);
+                        } else if (toShelfId === 'lido' && book.status !== 'lido') {
+                            showModal('Concluir Leitura?', `Deseja marcar "${book.title}" como concluído? A data de hoje será registada.`, [
+                                {
+                                    id: 'confirm-finish-reading', text: 'Sim, Concluir', class: 'btn-primary', onClick: () => {
+                                        const today = new Date().toISOString().split('T')[0];
+                                        handleStatusChange('lido', { endDate: today });
+                                    }
+                                }
+                            ]);
+                        } else if (book.status !== toShelfId) {
+                            await saveBook({ ...book, status: toShelfId, id: book.id });
+                        }
+                    } else {
+                        let newShelves = book.shelves ? [...book.shelves] : [];
+                        if (!newShelves.includes(toShelfId)) {
+                            newShelves.push(toShelfId);
+                        }
+                        await saveBook({ ...book, shelves: newShelves, id: book.id });
+                    }
+                    shelfPaginationState[fromShelfId] = oldPage;
+                    shelfPaginationState[toShelfId] = newPage;
+                }
+            }
+        });
+    });
+}
+
+function updateShelfPaginationView(shelfId, page) {
+    const shelfContainer = document.querySelector(`.shelf-container[data-shelf-id="${shelfId}"]`);
+    if (!shelfContainer) return;
+
+    const bookItems = shelfContainer.querySelectorAll('.book-item');
+    const itemsPerPage = 7;
+    const startIndex = (page - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+
+    bookItems.forEach((item, index) => {
+        const shouldBeHidden = !(index >= startIndex && index < endIndex);
+        item.classList.toggle('pag-hidden', shouldBeHidden);
+    });
+
+    const paginationContainer = shelfContainer.querySelector('.shelf-pagination');
+    if (paginationContainer) {
+        const totalPages = Math.ceil(bookItems.length / itemsPerPage);
+        paginationContainer.innerHTML = getPaginationButtonsHtml(page, totalPages);
+
+        // Reatribui os eventos de clique aos novos botões
+        paginationContainer.querySelectorAll('.pagination-btn').forEach(btn => {
+            btn.onclick = (e) => {
+                const shelfId = e.target.closest('.shelf-pagination').dataset.shelfId;
+                const newPage = parseInt(e.target.dataset.page, 10);
+                shelfPaginationState[shelfId] = newPage;
+                updateShelfPaginationView(shelfId, newPage);
+            };
+        });
+    }
+}
+
+
+function attachShelfEventListeners() {
     document.querySelectorAll('.delete-shelf-btn').forEach(btn => {
         btn.onclick = () => {
             const shelfId = btn.dataset.shelfId;
             const shelf = userShelves.find(s => s.id === shelfId);
-            if (shelf) showModal('Confirmar Exclusão', `Tem certeza que deseja excluir a estante "<strong>${shelf.name}</strong>"?`, [{ id: 'confirm-delete-shelf', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteShelf(shelfId) }]);
+            if (shelf) showModal('Confirmar Exclusão', `Tem a certeza que deseja excluir a estante "<strong>${shelf.name}</strong>"?`, [{ id: 'confirm-delete-shelf', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteShelf(shelfId) }]);
         }
     });
 
@@ -580,42 +965,23 @@ function renderEstantes() {
             removeBookFromShelf(bookId, shelfId);
         };
     });
+
+    document.querySelectorAll('.shelf-pagination .pagination-btn').forEach(btn => {
+        btn.onclick = (e) => {
+            const shelfPaginationDiv = e.target.closest('.shelf-pagination');
+            if (!shelfPaginationDiv) return;
+
+            const shelfId = shelfPaginationDiv.dataset.shelfId;
+            const page = parseInt(e.target.dataset.page, 10);
+
+            shelfPaginationState[shelfId] = page;
+            updateShelfPaginationView(shelfId, page);
+        }
+    });
 }
 
-function shelfSection(shelf) {
-    const booksOnShelf = allBooks.filter(book => book.shelves?.includes(shelf.id));
-    const bookCoversHtml = booksOnShelf.slice(0, 10).map(book => `
-        <div class="relative group w-24 flex-shrink-0">
-            <a href="#/book/${book.id}" class="block">
-                <img src="${getCoverUrl(book, 400, 600)}" alt="Capa de ${book.title}" class="w-full rounded-md shadow-lg aspect-[2/3] object-cover transition-transform duration-200 group-hover:scale-105 group-hover:shadow-xl">
-            </a>
-            <button data-book-id="${book.id}" data-shelf-id="${shelf.id}" class="remove-from-shelf-btn absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 items-center justify-center shadow-lg hover:bg-red-700 transition-all z-10 hidden group-hover:flex" title="Remover da estante">
-                <span class="material-symbols-outlined !text-base">close</span>
-            </button>
-        </div>
-        `).join('');
-
-    return `
-        <div class="card-expressive p-6">
-            <div class="flex justify-between items-center mb-4">
-                <div>
-                    <h2 class="font-display text-2xl">${shelf.name}</h2>
-                    <p class="text-sm text-neutral-400">${booksOnShelf.length} ${booksOnShelf.length === 1 ? 'livro' : 'livros'}</p>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button class="add-book-to-shelf-btn btn-expressive !h-10 !w-10 !p-0 !rounded-full btn-tonal" data-shelf-id="${shelf.id}" title="Adicionar livro a esta estante">
-                        <span class="material-symbols-outlined">add</span>
-                    </button>
-                    <button class="delete-shelf-btn text-neutral-500 hover:text-red-500" data-shelf-id="${shelf.id}" title="Apagar estante">
-                        <span class="material-symbols-outlined">delete</span>
-                    </button>
-                </div>
-            </div>
-            <div class="flex gap-4 overflow-x-auto p-4">
-                ${booksOnShelf.length > 0 ? bookCoversHtml : '<p class="text-neutral-500">Adicione livros a esta estante clicando no botão +.</p>'}
-            </div>
-        </div>`;
-}
+// O resto das funções (showAddBookToShelfModal, renderMeusLivros, etc.) permanecem as mesmas
+// e são incluídas abaixo para garantir que o ficheiro esteja completo.
 
 function showAddBookToShelfModal(shelfId) {
     const shelf = userShelves.find(s => s.id === shelfId);
@@ -650,7 +1016,7 @@ function renderMeusLivros() {
     const page = document.getElementById('page-meus-livros');
     page.innerHTML = `
         <div class="max-w-4xl mx-auto space-y-8">
-            ${getPageHeader('Meus Livros')}
+            ${getPageHeader('Os Meus Livros')}
             <div class="relative">
                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">search</span>
                 <input type="search" id="book-search-input" placeholder="Pesquisar em todos os livros..." class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl py-3 pl-10 pr-4" value="${shelfSearchTerm}">
@@ -674,7 +1040,7 @@ function renderShelfContent() {
     const contentContainer = document.getElementById('shelf-content');
     if (!contentContainer) return;
 
-    let filteredBooks = allBooks;
+    let filteredBooks = [...allBooks].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
 
     if (shelfSearchTerm) {
         const lowerCaseSearch = shelfSearchTerm.toLowerCase();
@@ -777,36 +1143,9 @@ function renderPaginationControls(totalPages, totalItems) {
     `;
 
     const pageButtonsContainer = document.getElementById('page-buttons');
-    let buttonsHtml = '';
-
-    if (totalPages > 1) {
-        buttonsHtml += `<button class="pagination-btn p-2 rounded-lg" ${currentPage === 1 ? 'disabled' : ''} data-page="${currentPage - 1}">&lt;</button>`;
-
-        let pagesToShow = [];
-        if (totalPages <= 5) {
-            for (let i = 1; i <= totalPages; i++) pagesToShow.push(i);
-        } else {
-            pagesToShow.push(1);
-            if (currentPage > 3) pagesToShow.push('...');
-            let start = Math.max(2, currentPage - 1);
-            let end = Math.min(totalPages - 1, currentPage + 1);
-            for (let i = start; i <= end; i++) pagesToShow.push(i);
-            if (currentPage < totalPages - 2) pagesToShow.push('...');
-            pagesToShow.push(totalPages);
-        }
-
-        pagesToShow.forEach(page => {
-            if (page === '...') {
-                buttonsHtml += `<span class="px-2">...</span>`;
-            } else {
-                buttonsHtml += `<button class="pagination-btn w-10 h-10 rounded-lg ${page === currentPage ? 'active' : ''}" data-page="${page}">${page}</button>`;
-            }
-        });
-
-        buttonsHtml += `<button class="pagination-btn p-2 rounded-lg" ${currentPage === totalPages ? 'disabled' : ''} data-page="${currentPage + 1}">&gt;</button>`;
+    if (pageButtonsContainer) {
+        pageButtonsContainer.innerHTML = getPaginationButtonsHtml(currentPage, totalPages);
     }
-
-    pageButtonsContainer.innerHTML = buttonsHtml;
 
     document.getElementById('items-per-page').onchange = (e) => {
         itemsPerPage = Number(e.target.value);
@@ -814,7 +1153,7 @@ function renderPaginationControls(totalPages, totalItems) {
         renderShelfContent();
     };
 
-    document.querySelectorAll('.pagination-btn').forEach(button => {
+    document.querySelectorAll('#page-buttons .pagination-btn').forEach(button => {
         button.onclick = (e) => {
             currentPage = Number(e.currentTarget.dataset.page);
             renderShelfContent();
@@ -853,10 +1192,10 @@ function renderProfile() {
 
     page.innerHTML = `
         <div class="max-w-2xl mx-auto space-y-8">
-            ${getPageHeader('Meu Perfil')}
+            ${getPageHeader('O Meu Perfil')}
             <form id="profile-form" class="space-y-8">
                  <div class="card-expressive p-6">
-                    <h2 class="text-xl font-bold mb-4 text-[hsl(var(--md-sys-color-primary))]">Seu Avatar</h2>
+                    <h2 class="text-xl font-bold mb-4 text-[hsl(var(--md-sys-color-primary))]">O seu Avatar</h2>
                     <input type="hidden" id="avatarUrl" value="${userProfile.avatarUrl || ''}">
                     <div id="avatar-selector" class="flex justify-center flex-wrap gap-4">
                         ${googlePhotoUrl ? `<img src="${googlePhotoUrl}" data-url="${googlePhotoUrl}" class="avatar-option w-24 h-24 rounded-full object-cover cursor-pointer border-4 border-transparent hover:border-[hsl(var(--md-sys-color-primary))] transition-all ${userProfile.avatarUrl === googlePhotoUrl ? '!border-[hsl(var(--md-sys-color-primary))]' : ''}" title="Usar foto do Google">` : ''}
@@ -873,7 +1212,7 @@ function renderProfile() {
                 <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                      <div class="md:col-span-2">
                         <label for="profile-name" class="block text-sm font-bold mb-2 text-neutral-300">Nome</label>
-                        <input type="text" id="profile-name" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${userProfile.name || auth.currentUser?.displayName || ''}" placeholder="Seu nome de exibição">
+                        <input type="text" id="profile-name" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${userProfile.name || auth.currentUser?.displayName || ''}" placeholder="O seu nome de exibição">
                     </div>
                     <div>
                         <label for="profile-pronouns" class="block text-sm font-bold mb-2 text-neutral-300">Pronomes</label>
@@ -938,7 +1277,7 @@ function renderSettings() {
             </div>
             
             <div class="card-expressive p-6">
-                <h2 class="text-xl font-bold mb-2 text-[hsl(var(--md-sys-color-primary))]">Gerenciar Dados</h2>
+                <h2 class="text-xl font-bold mb-2 text-[hsl(var(--md-sys-color-primary))]">Gerir Dados</h2>
                 <div class="flex flex-col sm:flex-row gap-4">
                     <button id="import-csv-btn" class="btn-expressive btn-text flex-1"><span class="material-symbols-outlined mr-2">upload</span> Importar CSV</button>
                     <input type="file" id="csv-file-input" class="hidden" accept=".csv">
@@ -948,13 +1287,13 @@ function renderSettings() {
 
             <div class="card-expressive p-6">
                 <h2 class="text-xl font-bold mb-2 text-[hsl(var(--md-sys-color-primary))]">Sessão</h2>
-                <p class="text-neutral-300 mb-4">Você está logado. Para sair, clique no botão abaixo.</p>
+                <p class="text-neutral-300 mb-4">Você está ligado. Para sair, clique no botão abaixo.</p>
                 <button id="logout-btn" class="btn-expressive btn-tonal w-full">Sair da Conta</button>
             </div>
 
             <div class="card-expressive p-6 border-l-4 border-red-500">
                 <h2 class="text-xl font-bold mb-2 text-red-400">Zona de Perigo</h2>
-                 <p class="text-neutral-300 mb-4">A ação abaixo é irreversível. Tenha certeza do que está fazendo.</p>
+                 <p class="text-neutral-300 mb-4">A ação abaixo é irreversível. Tenha a certeza do que está a fazer.</p>
                 <button id="delete-all-books-btn" class="btn-expressive bg-red-800/80 hover:bg-red-800 text-white w-full">Deletar Todos os Livros</button>
             </div>
          </div>`;
@@ -963,12 +1302,9 @@ function renderSettings() {
     document.getElementById('csv-file-input').onchange = handleCsvImport;
     document.getElementById('export-csv-btn').onclick = handleCsvExport;
     document.getElementById('logout-btn').onclick = () => { signOut(auth).then(() => { localStorage.clear(); window.location.href = 'index.html'; }); };
-    document.getElementById('delete-all-books-btn').onclick = () => { showModal('Confirmar Exclusão Total', 'Tem certeza?', [{ id: 'confirm-delete-all-btn', text: 'Sim, Excluir Tudo', class: 'bg-red-600 text-white', onClick: deleteAllBooks }]); };
+    document.getElementById('delete-all-books-btn').onclick = () => { showModal('Confirmar Exclusão Total', 'Tem a certeza?', [{ id: 'confirm-delete-all-btn', text: 'Sim, Excluir Tudo', class: 'bg-red-600 text-white', onClick: deleteAllBooks }]); };
 }
 
-// *** CORREÇÃO INICIADA ***
-// A função renderFormInModal foi modificada para aceitar dados iniciais de um livro,
-// permitindo que a busca da API preencha o formulário diretamente.
 async function renderFormInModal(bookId = null, initialData = null) {
     const modalContainer = document.getElementById('modal-container');
     const modalContent = document.getElementById('modal-content');
@@ -976,10 +1312,8 @@ async function renderFormInModal(bookId = null, initialData = null) {
     const isEditing = bookId !== null;
 
     if (initialData) {
-        // Usa os dados fornecidos (da API do Google Books) se existirem
         book = initialData;
     } else if (isEditing) {
-        // Se não houver dados iniciais, mas for uma edição, busca o livro na lista
         book = allBooks.find(b => b.id === bookId) || {};
     }
 
@@ -1010,7 +1344,7 @@ async function renderFormInModal(bookId = null, initialData = null) {
                         <div class="flex items-center gap-2 pt-2 border-t border-neutral-700/50"><input type="text" id="new-shelf-name-inline" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-2 text-sm" placeholder="Nome da nova estante"><button type="button" id="add-new-shelf-inline-btn" class="btn-expressive btn-tonal !h-auto !py-2 !px-3 !text-xs">Criar e Adicionar</button></div>
                     </div>
 
-                    <div class="card-expressive p-6 space-y-4"><h3 class="text-xl font-bold text-[hsl(var(--md-sys-color-primary))]">Como este livro te fez sentir?</h3><div id="feelings-container" class="flex flex-wrap gap-2">${sentimentos.map(s => `<button type="button" data-feeling="${s}" class="mood-tag-btn btn-expressive !py-1 !px-3 !h-auto !text-xs capitalize ${selectedFeelings.includes(s) ? 'selected' : ''}">${s}</button>`).join('')}</div><input type="hidden" id="feelingsValue" value="${selectedFeelings.join(',') || ''}"></div>
+                    <div class="card-expressive p-6 space-y-4"><h3 class="text-xl font-bold text-[hsl(var(--md-sys-color-primary))]">Como este livro o fez sentir?</h3><div id="feelings-container" class="flex flex-wrap gap-2">${sentimentos.map(s => `<button type="button" data-feeling="${s}" class="mood-tag-btn btn-expressive !py-1 !px-3 !h-auto !text-xs capitalize ${selectedFeelings.includes(s) ? 'selected' : ''}">${s}</button>`).join('')}</div><input type="hidden" id="feelingsValue" value="${selectedFeelings.join(',') || ''}"></div>
 
                     <div class="card-expressive p-6">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
@@ -1026,7 +1360,7 @@ async function renderFormInModal(bookId = null, initialData = null) {
                     
                     <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div><label for="synopsis" class="block text-sm font-bold mb-2 text-neutral-300">Sinopse</label><textarea id="synopsis" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.synopsis || ''}</textarea></div>
-                        <div><label for="review" class="block text-sm font-bold mb-2 text-neutral-300">Minha Resenha</label><textarea id="review" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.review || ''}</textarea></div>
+                        <div><label for="review" class="block text-sm font-bold mb-2 text-neutral-300">A Minha Resenha</label><textarea id="review" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.review || ''}</textarea></div>
                         <div class="md:col-span-2"><label for="categories" class="block text-sm font-bold mb-2 text-neutral-300">Categorias (separadas por vírgula)</label><input type="text" id="categories" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${(book.categories || []).join(', ')}"></div>
                     </div>
                     
@@ -1049,7 +1383,6 @@ async function renderFormInModal(bookId = null, initialData = null) {
     setupFormListeners(modalContent);
     document.addEventListener('keydown', handleEscKey);
 }
-
 
 function setupFormListeners(container = document) {
     const stars = container.querySelectorAll('.star-icon');
@@ -1170,7 +1503,7 @@ async function renderDetailsInModal(bookId) {
                     ${book.status === 'lendo' ? renderProgressUpdater(book) : ''}
                      ${shelvesHtml}
                      ${book.synopsis ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Sinopse</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.synopsis}</p></div>` : ''}
-                     ${book.review ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Minha Resenha</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.review}</p></div>` : ''}
+                     ${book.review ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">A Minha Resenha</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.review}</p></div>` : ''}
                      ${feelingsHtml}
                 </div>
             </div>
@@ -1183,7 +1516,7 @@ async function renderDetailsInModal(bookId) {
     modalContent.querySelector('#modal-close-btn').onclick = hideModal;
     modalContainer.onclick = hideModal;
     modalContent.firstElementChild.onclick = (e) => e.stopPropagation();
-    modalContent.querySelector('#delete-book-btn').onclick = () => showModal('Confirmar Exclusão', `Tem certeza que deseja excluir o livro "<strong>${book.title}</strong>"?`, [{ id: 'confirm-delete-btn', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteBook(book.id) }]);
+    modalContent.querySelector('#delete-book-btn').onclick = () => showModal('Confirmar Exclusão', `Tem a certeza que deseja excluir o livro "<strong>${book.title}</strong>"?`, [{ id: 'confirm-delete-btn', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteBook(book.id) }]);
     modalContent.querySelector('#quick-add-to-shelf-btn').onclick = () => showQuickShelfManager(book);
 
     if (book.status === 'lendo') {
@@ -1266,9 +1599,6 @@ async function handleMetadataSearch(container = document) {
     }
 }
 
-// *** CORREÇÃO INICIADA ***
-// A função showApiResultsModal foi alterada para fixar o layout do popup de resultados.
-// A capa do livro agora tem tamanho fixo e a área de descrição é rolável.
 function showApiResultsModal() {
     const book = apiSearchResults[currentApiResultIndex];
     if (!book) return;
@@ -1293,7 +1623,6 @@ function showApiResultsModal() {
              <button id="next-book-btn" class="btn-expressive btn-text !h-10 !p-2">Próx &gt;</button>
         </div>
     `;
-    // A ação do botão agora chama a função selectApiBook corrigida e mantém o modal principal aberto.
     const actions = [{ id: 'select-book-btn', text: 'É esta!', class: 'btn-primary', onClick: selectApiBook, keepOpen: true }];
 
     showModal(`Resultados da Busca`, content, actions);
@@ -1306,11 +1635,6 @@ function showApiResultsModal() {
 function showNextApiBook() { if (currentApiResultIndex < apiSearchResults.length - 1) { currentApiResultIndex++; showApiResultsModal(); } }
 function showPrevApiBook() { if (currentApiResultIndex > 0) { currentApiResultIndex--; showApiResultsModal(); } }
 
-
-// *** CORREÇÃO INICIADA ***
-// A função selectApiBook foi reescrita. Agora ela não tenta mais encontrar o formulário (que foi substituído).
-// Em vez disso, ela pega os dados do livro, cria um objeto e chama a função renderFormInModal,
-// passando esses dados para que o formulário seja recriado já preenchido.
 function selectApiBook() {
     const bookResult = apiSearchResults[currentApiResultIndex].volumeInfo;
 
@@ -1330,7 +1654,6 @@ function selectApiBook() {
         shelves: [],
     };
 
-    // Recarrega o modal do formulário, passando os dados do livro encontrado
     renderFormInModal(null, bookData);
 }
 
@@ -1341,7 +1664,7 @@ function handleCsvExport() {
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = "minha_estante.csv";
+    link.download = "a_minha_estante.csv";
     link.click();
 }
 
@@ -1376,7 +1699,7 @@ function handleCsvImport(event) {
                 showModal("Nenhum livro válido", "Não foram encontrados livros válidos para importar.");
             }
         },
-        error: (err) => { hideModal(); showModal("Erro no CSV", `Não foi possível processar o arquivo: ${err.message}`); }
+        error: (err) => { hideModal(); showModal("Erro no CSV", `Não foi possível processar o ficheiro: ${err.message}`); }
     });
 }
 
