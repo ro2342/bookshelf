@@ -219,3 +219,15 @@ body {
     border-radius: 0.5rem;
     box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
 }
+
+/* Estilos para o seletor visual de capas */
+.book-cover-selector img {
+    border: 3px solid transparent; /* Começa com uma borda transparente */
+    transition: all 0.2s ease-in-out;
+}
+
+.book-cover-selector .peer:checked ~ img {
+    border-color: hsl(var(--md-sys-color-primary));
+    transform: scale(0.95);
+    box-shadow: 0 0 15px hsla(var(--md-sys-color-primary), 0.5);
+}

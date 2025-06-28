@@ -20,8 +20,10 @@ const GOOGLE_BOOKS_API_KEY = "AIzaSyAVtbiQ6V2O0GhRk8aStfkSENRYy9xsa5U";
 let app, db, auth, storage;
 let userId = null;
 let booksUnsubscribe = () => { };
+let shelvesUnsubscribe = () => { };
 let profileUnsubscribe = () => { };
 let allBooks = [];
+let userShelves = [];
 let userProfile = {};
 let currentFilter = 'todos';
 let currentPage = 1;
@@ -68,14 +70,12 @@ function applyTheme(themeName, saveToDb = true) {
     localStorage.setItem('bookTrackerTheme', themeName);
 
     if (saveToDb && userId) {
-        saveProfile({ theme: themeName }, false); // Salva o tema no perfil do usuário silenciosamente
+        saveProfile({ theme: themeName }, false);
     }
 }
 
 function initTheme() {
     const savedTheme = localStorage.getItem('bookTrackerTheme');
-    // Aplica o tema do localStorage inicialmente para uma pintura rápida.
-    // O tema do Firebase será aplicado depois, se existir, através do listenToProfile.
     if (savedTheme && themes[savedTheme]) {
         applyTheme(savedTheme, false);
     } else {
@@ -89,9 +89,9 @@ function showModal(title, content, actions = []) {
     const modalContent = document.getElementById('modal-content');
 
     let actionsHtml = actions.map(action => `<button id="${action.id}" class="btn-expressive ${action.class}">${action.text}</button>`).join('');
-    const closeButtonHtml = `<button id="modal-close-x" class="absolute top-4 right-4 text-neutral-500 hover:text-white text-3xl leading-none">&times;</button>`;
+    const closeButtonHtml = `<button id="modal-close-x" class="absolute top-4 right-4 text-neutral-500 hover:text-white text-3xl leading-none z-20">&times;</button>`;
 
-    modalContent.innerHTML = `<div class="relative p-8 max-w-md w-full card-expressive">${closeButtonHtml}<h2 class="text-2xl font-bold mb-4">${title}</h2><div class="text-neutral-300 mb-6">${content}</div><div class="flex gap-4 justify-end">${actionsHtml}</div></div>`;
+    modalContent.innerHTML = `<div class="relative p-8 max-w-lg w-full card-expressive">${closeButtonHtml}<h2 class="text-2xl font-bold mb-4">${title}</h2><div class="text-neutral-300 mb-6">${content}</div><div class="flex gap-4 justify-end">${actionsHtml}</div></div>`;
     modalContainer.classList.remove('hidden');
 
     modalContent.firstChild.onclick = (e) => e.stopPropagation();
@@ -114,13 +114,12 @@ function hideModal() {
     modalContainer.classList.add('hidden');
     document.getElementById('modal-content').innerHTML = '';
 
-    // Reseta o hash se um modal de livro ou formulário foi fechado
     const currentHash = window.location.hash;
     if (currentHash.includes('#/book/') || currentHash.includes('#/add') || currentHash.includes('#/edit/')) {
-        window.location.hash = '#/estante';
+        window.location.hash = '#/estantes';
     }
 
-    window.scrollTo(0, 0); // Rola a página principal para o topo
+    window.scrollTo(0, 0);
     document.removeEventListener('keydown', handleEscKey);
 }
 
@@ -143,6 +142,7 @@ function showLoading(message = 'Aguarde...') {
 function initializeAppLogic() {
     document.getElementById('page-loader').classList.add('hidden');
     listenToBooks();
+    listenToShelves();
     listenToProfile();
     setupInteractiveNav();
     router();
@@ -233,6 +233,20 @@ function listenToBooks() {
     });
 }
 
+function listenToShelves() {
+    if (typeof shelvesUnsubscribe === 'function') shelvesUnsubscribe();
+    if (!userId) return;
+
+    const shelvesCollection = collection(db, "users", userId, "shelves");
+    shelvesUnsubscribe = onSnapshot(shelvesCollection, (snapshot) => {
+        userShelves = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).sort((a, b) => a.name.localeCompare(b.name));
+        router();
+    }, (error) => {
+        console.error("Erro ao ouvir estantes:", error);
+    });
+}
+
+
 function listenToProfile() {
     if (typeof profileUnsubscribe === 'function') profileUnsubscribe();
     if (!userId) return;
@@ -242,23 +256,12 @@ function listenToProfile() {
         userProfile = doc.exists() ? doc.data() : {};
         const currentUser = auth.currentUser;
         if (currentUser) {
-            if (!userProfile.name && currentUser.displayName) {
-                userProfile.name = currentUser.displayName;
-            }
-            if (!userProfile.avatarUrl && currentUser.photoURL) {
-                userProfile.avatarUrl = currentUser.photoURL;
-            }
+            if (!userProfile.name && currentUser.displayName) userProfile.name = currentUser.displayName;
+            if (!userProfile.avatarUrl && currentUser.photoURL) userProfile.avatarUrl = currentUser.photoURL;
         }
-
-        // Aplica o tema do perfil do Firebase, se existir
-        if (userProfile.theme) {
-            applyTheme(userProfile.theme, false); // false para não salvar de volta no DB
-        }
-
-        router(); // Re-renderiza a página ativa para refletir quaisquer mudanças
-    }, (error) => {
-        console.error("Erro ao ouvir perfil:", error);
-    });
+        if (userProfile.theme) applyTheme(userProfile.theme, false);
+        router();
+    }, (error) => console.error("Erro ao ouvir perfil:", error));
 }
 
 async function saveData(collectionName, data, docId = null) {
@@ -266,17 +269,15 @@ async function saveData(collectionName, data, docId = null) {
         showModal("Erro", "Utilizador não autenticado. Não é possível salvar.");
         return null;
     }
-
     const basePath = collection(db, "users", userId, collectionName);
-
     try {
         if (docId) {
-            const docRef = doc(basePath, docId);
-            await updateDoc(docRef, data);
+            await updateDoc(doc(basePath, docId), data);
             return docId;
         } else {
-            const newDocRef = await addDoc(basePath, data);
-            return newDocRef.id;
+            const docRef = doc(collection(db, "users", userId, collectionName));
+            await setDoc(docRef, data);
+            return docRef.id;
         }
     } catch (error) {
         console.error(`Erro ao salvar em ${collectionName}:`, error);
@@ -285,26 +286,29 @@ async function saveData(collectionName, data, docId = null) {
     }
 }
 
-async function saveBook(bookData) {
-    const collectionName = 'books';
-    const docId = bookData.id || null;
 
+async function saveBook(bookData) {
+    const docId = bookData.id || null;
     let dataToSave = { ...bookData };
     delete dataToSave.id;
-
-    if (!docId) {
-        dataToSave.addedAt = new Date();
-    }
-
-    return await saveData(collectionName, dataToSave, docId);
+    if (!docId) dataToSave.addedAt = new Date();
+    dataToSave.shelves = dataToSave.shelves || [];
+    return await saveData('books', dataToSave, docId);
 }
 
-async function saveProfile(profileData, showModals = true) {
-    if (!userId) return; // Não mostra modal se o usuário não estiver logado
+async function saveShelf(shelfData) {
+    const docId = shelfData.id || null;
+    let dataToSave = { ...shelfData };
+    delete dataToSave.id;
+    if (!docId) dataToSave.createdAt = new Date();
+    return await saveData('shelves', dataToSave, docId);
+}
 
+
+async function saveProfile(profileData, showModals = true) {
+    if (!userId) return;
     const profileDocRef = doc(db, "users", userId, "profile", "data");
     if (showModals) showLoading("Salvando perfil...");
-
     try {
         await setDoc(profileDocRef, profileData, { merge: true });
         if (showModals) {
@@ -320,42 +324,119 @@ async function saveProfile(profileData, showModals = true) {
 
 async function deleteAllBooks() {
     if (!userId) return;
-
-    showLoading("A apagar todos os livros...");
-    try {
-        const batch = writeBatch(db);
-        const booksCollectionRef = collection(db, "users", userId, "books");
-        const querySnapshot = await getDocs(booksCollectionRef);
-        console.log(`Encontrados ${querySnapshot.size} livros para apagar.`);
-        querySnapshot.forEach((doc) => {
-            batch.delete(doc.ref);
-        });
-        await batch.commit();
-        console.log("Todos os livros foram apagados com sucesso.");
-        hideModal();
-        showModal("Sucesso", "Todos os seus livros foram apagados.");
-    } catch (error) {
-        hideModal();
-        showModal("Erro", `Não foi possível apagar os livros: ${error.message}`);
-        console.error("Erro ao apagar todos os livros:", error);
-    }
+    showModal(
+        'Confirmar Exclusão Total',
+        `Tem certeza que deseja excluir <strong>TODOS</strong> os seus livros? Esta ação não pode ser desfeita.`,
+        [{
+            id: 'confirm-delete-all-btn', text: 'Sim, Excluir Tudo', class: 'bg-red-600 text-white', onClick: async () => {
+                showLoading("A apagar todos os livros...");
+                try {
+                    const batch = writeBatch(db);
+                    const booksCollectionRef = collection(db, "users", userId, "books");
+                    const querySnapshot = await getDocs(booksCollectionRef);
+                    querySnapshot.forEach((doc) => batch.delete(doc.ref));
+                    await batch.commit();
+                    hideModal();
+                    showModal("Sucesso", "Todos os seus livros foram apagados.");
+                } catch (error) {
+                    hideModal();
+                    showModal("Erro", `Não foi possível apagar os livros: ${error.message}`);
+                }
+            }
+        }]
+    );
 }
 
 async function deleteBook(bookId) {
     if (!userId) return;
     try {
-        const docRef = doc(db, "users", userId, "books", bookId);
-        await deleteDoc(docRef);
-        console.log("Livro deletado:", bookId);
-        hideModal(); // Fecha o modal de detalhes após deletar
+        await deleteDoc(doc(db, "users", userId, "books", bookId));
+        hideModal();
     } catch (error) {
         console.error("Erro ao deletar livro: ", error);
         showModal("Erro", "Não foi possível deletar o livro.");
     }
 }
 
+async function deleteShelf(shelfId) {
+    if (!userId || !shelfId) return;
+    showLoading("Apagando estante...");
+    try {
+        const batch = writeBatch(db);
+        batch.delete(doc(db, "users", userId, "shelves", shelfId));
+        allBooks.forEach(book => {
+            if (book.shelves?.includes(shelfId)) {
+                const updatedShelves = book.shelves.filter(sId => sId !== shelfId);
+                batch.update(doc(db, "users", userId, "books", book.id), { shelves: updatedShelves });
+            }
+        });
+        await batch.commit();
+        hideModal();
+        showModal("Sucesso", "Estante apagada com sucesso!");
+    } catch (error) {
+        hideModal();
+        showModal("Erro", `Não foi possível apagar a estante: ${error.message}`);
+        console.error("Erro ao apagar estante:", error);
+    }
+}
+
+async function addBooksToShelf(shelfId, bookIds) {
+    if (!userId || !shelfId || !bookIds || bookIds.length === 0) return;
+    showLoading(`Adicionando ${bookIds.length} livro(s)...`);
+    try {
+        const batch = writeBatch(db);
+        const shelf = userShelves.find(s => s.id === shelfId);
+        if (!shelf) throw new Error("Estante não encontrada.");
+
+        bookIds.forEach(bookId => {
+            const bookRef = doc(db, "users", userId, "books", bookId);
+            const book = allBooks.find(b => b.id === bookId);
+            const currentShelves = book?.shelves || [];
+            if (!currentShelves.includes(shelfId)) {
+                batch.update(bookRef, { shelves: [...currentShelves, shelfId] });
+            }
+        });
+
+        await batch.commit();
+        hideModal();
+        showModal("Sucesso!", `Livro(s) adicionado(s) à estante "${shelf.name}".`);
+    } catch (error) {
+        hideModal();
+        showModal("Erro", `Não foi possível adicionar os livros: ${error.message}`);
+        console.error("Erro ao adicionar livros à estante:", error);
+    }
+}
+
+async function removeBookFromShelf(bookId, shelfId) {
+    if (!userId || !bookId || !shelfId) return;
+
+    const book = allBooks.find(b => b.id === bookId);
+    if (!book || !book.shelves) return;
+
+    const updatedShelves = book.shelves.filter(sId => sId !== shelfId);
+    const bookRef = doc(db, "users", userId, "books", bookId);
+
+    try {
+        await updateDoc(bookRef, { shelves: updatedShelves });
+        // The UI will update automatically via the onSnapshot listener.
+    } catch (error) {
+        console.error("Erro ao remover livro da estante:", error);
+        showModal("Erro", `Não foi possível remover o livro: ${error.message}`);
+    }
+}
+
+// --- Funções Auxiliares de UI e Dados ---
+function getCoverUrl(book, width = 200, height = 300) {
+    if (book.coverUrl && !book.coverUrl.includes('placehold.co')) {
+        return book.coverUrl;
+    }
+    const titleText = book.title ? book.title.split(' ').slice(0, 3).join(' ') : 'Sem Título';
+    return `https://placehold.co/${width}x${height}/1a1a1a/ffffff?text=${encodeURIComponent(titleText)}`;
+}
+
+
 // --- Funções do Router e Renderização ---
-const pages = ['estatisticas', 'estante', 'profile', 'settings']; // A página 'form' foi removida
+const pages = ['estantes', 'meus-livros', 'estatisticas', 'profile', 'settings'];
 function hideAllPages() {
     pages.forEach(pageId => {
         const pageEl = document.getElementById(`page-${pageId}`);
@@ -367,27 +448,21 @@ function hideAllPages() {
 
 function router() {
     if (!userId) {
-        const loader = document.getElementById('page-loader');
-        if (loader) loader.classList.remove('hidden');
+        document.getElementById('page-loader')?.classList.remove('hidden');
         return;
     };
 
-    const currentHash = window.location.hash || '#/estante';
+    const currentHash = window.location.hash || '#/estantes';
     const [path, param] = currentHash.substring(2).split('/');
 
-    // Funções que abrem modais
-    const modalRoutes = {
-        'book': renderDetailsInModal,
-        'add': renderFormInModal,
-        'edit': renderFormInModal,
-    };
+    const modalRoutes = { 'book': renderDetailsInModal, 'add': renderFormInModal, 'edit': renderFormInModal };
 
     if (modalRoutes[path]) {
-        hideAllPages();
-        const pageEstante = document.getElementById('page-estante');
-        if (pageEstante.innerHTML === '') renderEstante();
-        pageEstante.classList.remove('hidden');
-        modalRoutes[path](param); // param será o bookId para 'book' e 'edit'
+        const backgroundPageId = window.location.hash.includes('estante') ? 'page-estantes' : 'page-meus-livros';
+        const backgroundPage = document.getElementById(backgroundPageId);
+        if (backgroundPage) backgroundPage.classList.remove('hidden');
+
+        modalRoutes[path](param);
         return;
     }
 
@@ -398,124 +473,260 @@ function router() {
     hideAllPages();
     updateNavLinks(currentHash);
 
-    const pageId = path === 'inicio' ? 'estante' : path;
     const fab = document.getElementById('fab-add-book');
-    fab.classList.toggle('hidden', path !== 'estante' && path !== 'estatisticas' && path !== 'inicio');
+    fab.classList.toggle('hidden', path !== 'meus-livros' && path !== 'estantes');
 
-    const targetPage = document.getElementById(`page-${pageId}`);
+    if (path !== 'meus-livros') shelfSearchTerm = '';
+
+    const targetPage = document.getElementById(`page-${path}`);
     if (targetPage) {
         targetPage.classList.remove('hidden');
-        switch (pageId) {
+        switch (path) {
+            case 'estantes': renderEstantes(); break;
+            case 'meus-livros': renderMeusLivros(); break;
             case 'estatisticas': renderEstatisticas(); break;
-            case 'estante': renderEstante(); break;
             case 'profile': renderProfile(); break;
             case 'settings': renderSettings(); break;
             default:
-                document.getElementById('page-estante').classList.remove('hidden');
-                renderEstante();
+                document.getElementById('page-estantes').classList.remove('hidden');
+                renderEstantes();
         }
     } else {
-        document.getElementById('page-estante').classList.remove('hidden');
-        renderEstante();
+        document.getElementById('page-estantes').classList.remove('hidden');
+        renderEstantes();
     }
 }
 
 function updateNavLinks(activeHash) {
     document.querySelectorAll('.nav-link').forEach(link => {
-        let linkBaseHash = new URL(link.href).hash.split('/')[1] || 'estante';
-        if (linkBaseHash === 'inicio') linkBaseHash = 'estante';
-        let activeBaseHash = activeHash.split('/')[1] || 'estante';
-        if (activeBaseHash === 'inicio') activeBaseHash = 'estante';
-
-        if (linkBaseHash === activeBaseHash) {
+        const linkHash = new URL(link.href).hash;
+        if (linkHash === activeHash) {
             link.classList.add('text-white', 'bg-neutral-700/50');
             link.classList.remove('text-neutral-400');
         } else {
-            link.classList.add('text-neutral-400');
             link.classList.remove('text-white', 'bg-neutral-700/50');
+            link.classList.add('text-neutral-400');
         }
     });
 }
 
-function renderEstante() {
-    const page = document.getElementById('page-estante');
-    const displayName = userProfile.name || 'Leitor(a)';
+function getPageHeader(title) {
+    const displayName = userProfile.name ? userProfile.name.split(' ')[0] : 'Leitor(a)';
     const avatarUrl = userProfile.avatarUrl || 'https://placehold.co/200x200/171717/FFFFFF?text=A';
+    return `
+        <div class="flex items-center gap-4 mb-8">
+            <img src="${avatarUrl}" alt="Avatar do utilizador" class="w-16 h-16 rounded-full object-cover shadow-lg">
+            <div>
+                <p class="text-xl text-neutral-300">Oi, <span class="font-bold text-white">${displayName}</span>!</p>
+                <h1 class="font-display text-5xl md:text-6xl">${title}</h1>
+            </div>
+        </div>
+    `;
+}
 
-    const statusMap = { todos: 'Todos', lendo: 'Lendo Agora', lido: 'Lidos', abandonado: 'Abandonados', 'quero-ler': 'Quero Ler', favorito: 'Favoritos', comCapa: 'Com Capa', semCapa: 'Sem Capa' };
-    const counts = {
-        todos: allBooks.length,
-        lendo: allBooks.filter(b => b.status === 'lendo').length,
-        lido: allBooks.filter(b => b.status === 'lido').length,
-        'quero-ler': allBooks.filter(b => b.status === 'quero-ler').length,
-        abandonado: allBooks.filter(b => b.status === 'abandonado').length,
-        favorito: allBooks.filter(b => b.favorite).length,
-        comCapa: allBooks.filter(b => b.coverUrl).length,
-        semCapa: allBooks.filter(b => !b.coverUrl).length
-    };
-
+function renderEstantes() {
+    const page = document.getElementById('page-estantes');
     page.innerHTML = `
         <div class="max-w-4xl mx-auto space-y-8">
-             <div class="flex items-center gap-4">
-                <img src="${avatarUrl}" alt="Avatar do utilizador" class="w-16 h-16 rounded-full object-cover shadow-lg">
-                <div>
-                    <p class="text-neutral-400 text-lg">Boas vindas de volta,</p>
-                    <h1 class="font-display text-3xl">${displayName}</h1>
-                </div>
+            ${getPageHeader('Estantes')}
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <p class="text-neutral-400">Organize suas leituras em coleções personalizadas.</p>
+                <button id="create-shelf-btn" class="btn-expressive btn-primary">
+                    <span class="material-symbols-outlined mr-2">add</span> Criar Estante
+                </button>
             </div>
-            
-            <div>
-                 <h1 class="font-display text-5xl md:text-6xl">Minha estante</h1>
-                 <p class="text-neutral-400 mt-2">Tudo o que você leu, vai ler, quer ler. Ou abandonou. Sem julgamentos.</p>
+            <div id="shelves-list" class="space-y-12">
+                ${userShelves.length === 0 ? `
+                    <div class="text-center py-20 card-expressive">
+                        <span class="material-symbols-outlined text-6xl text-neutral-500 mb-4">shelf_auto_hide</span>
+                        <h3 class="text-xl font-bold">Nenhuma estante criada</h3>
+                        <p class="text-neutral-400">Clique em "Criar Estante" para começar a organizar seus livros.</p>
+                    </div>`
+            : userShelves.map(shelf => shelfSection(shelf)).join('')}
             </div>
-
-            <div class="segmented-btn-container flex-wrap flex gap-2">
-                ${Object.keys(statusMap).map(key => `
-                    <button data-filter="${key}" class="filter-btn btn-expressive py-2 px-4 h-auto text-sm ${currentFilter === key ? 'active' : ''}">
-                        ${statusMap[key]} (${counts[key] || 0})
-                    </button>
-                `).join('')}
-            </div>
-            
-            <div id="shelf-content" class="space-y-4"></div>
-            <div id="pagination-controls" class="mt-8"></div>
         </div>
     `;
 
-    renderShelfContent();
+    document.getElementById('create-shelf-btn').onclick = () => {
+        showModal(
+            'Criar Nova Estante',
+            `<input type="text" id="new-shelf-name" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" placeholder="Ex: Leituras de 2025">`,
+            [{
+                id: 'confirm-create-shelf', text: 'Criar', class: 'btn-primary', onClick: () => {
+                    const name = document.getElementById('new-shelf-name').value.trim();
+                    if (name) saveShelf({ name });
+                }
+            }]
+        )
+    };
 
-    document.querySelectorAll('.filter-btn').forEach(btn => {
+    document.querySelectorAll('.delete-shelf-btn').forEach(btn => {
+        btn.onclick = () => {
+            const shelfId = btn.dataset.shelfId;
+            const shelf = userShelves.find(s => s.id === shelfId);
+            if (shelf) showModal('Confirmar Exclusão', `Tem certeza que deseja excluir a estante "<strong>${shelf.name}</strong>"?`, [{ id: 'confirm-delete-shelf', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteShelf(shelfId) }]);
+        }
+    });
+
+    document.querySelectorAll('.add-book-to-shelf-btn').forEach(btn => {
+        btn.onclick = () => showAddBookToShelfModal(btn.dataset.shelfId);
+    });
+
+    document.querySelectorAll('.remove-from-shelf-btn').forEach(btn => {
         btn.onclick = (e) => {
-            currentFilter = e.currentTarget.dataset.filter;
-            currentPage = 1;
-            renderShelfContent();
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            e.currentTarget.classList.add('active');
+            e.preventDefault();
+            e.stopPropagation();
+            const { bookId, shelfId } = e.currentTarget.dataset;
+            removeBookFromShelf(bookId, shelfId);
         };
     });
+}
+
+function shelfSection(shelf) {
+    const booksOnShelf = allBooks.filter(book => book.shelves?.includes(shelf.id));
+    const bookCoversHtml = booksOnShelf.slice(0, 10).map(book => `
+        <div class="relative group w-24 flex-shrink-0">
+            <a href="#/book/${book.id}" class="block">
+                <img src="${getCoverUrl(book, 400, 600)}" alt="Capa de ${book.title}" class="w-full rounded-md shadow-lg aspect-[2/3] object-cover transition-transform duration-200 group-hover:scale-105 group-hover:shadow-xl">
+            </a>
+            <button data-book-id="${book.id}" data-shelf-id="${shelf.id}" class="remove-from-shelf-btn absolute -top-2 -right-2 bg-red-600 text-white rounded-full w-6 h-6 items-center justify-center shadow-lg hover:bg-red-700 transition-all z-10 hidden group-hover:flex" title="Remover da estante">
+                <span class="material-symbols-outlined !text-base">close</span>
+            </button>
+        </div>
+        `).join('');
+
+    return `
+        <div class="card-expressive p-6">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h2 class="font-display text-2xl">${shelf.name}</h2>
+                    <p class="text-sm text-neutral-400">${booksOnShelf.length} ${booksOnShelf.length === 1 ? 'livro' : 'livros'}</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button class="add-book-to-shelf-btn btn-expressive !h-10 !w-10 !p-0 !rounded-full btn-tonal" data-shelf-id="${shelf.id}" title="Adicionar livro a esta estante">
+                        <span class="material-symbols-outlined">add</span>
+                    </button>
+                    <button class="delete-shelf-btn text-neutral-500 hover:text-red-500" data-shelf-id="${shelf.id}" title="Apagar estante">
+                        <span class="material-symbols-outlined">delete</span>
+                    </button>
+                </div>
+            </div>
+            <div class="flex gap-4 overflow-x-auto p-4">
+                ${booksOnShelf.length > 0 ? bookCoversHtml : '<p class="text-neutral-500">Adicione livros a esta estante clicando no botão +.</p>'}
+            </div>
+        </div>`;
+}
+
+function showAddBookToShelfModal(shelfId) {
+    const shelf = userShelves.find(s => s.id === shelfId);
+    if (!shelf) return;
+
+    const booksNotInShelf = allBooks.filter(book => !book.shelves?.includes(shelfId));
+
+    const content = booksNotInShelf.length > 0 ?
+        `<div class="grid grid-cols-3 sm:grid-cols-4 gap-4 max-h-80 overflow-y-auto pr-2">
+            ${booksNotInShelf.map(book => `
+                <label class="book-cover-selector aspect-[2/3] relative cursor-pointer">
+                    <input type="checkbox" name="add-books" value="${book.id}" class="sr-only peer">
+                    <img src="${getCoverUrl(book)}" alt="${book.title}" class="w-full h-full object-cover rounded-lg shadow-md transition-all">
+                </label>`).join('')}
+        </div>` :
+        '<p class="text-center text-neutral-400">Todos os seus livros já estão nesta estante.</p>';
+
+    const actions = booksNotInShelf.length > 0 ? [{
+        id: 'confirm-add-books', text: 'Adicionar Selecionados', class: 'btn-primary', onClick: () => {
+            const selectedBookIds = Array.from(document.querySelectorAll('input[name="add-books"]:checked')).map(cb => cb.value);
+            if (selectedBookIds.length > 0) {
+                addBooksToShelf(shelfId, selectedBookIds);
+            }
+        }
+    }] : [];
+
+    showModal(`Adicionar à Estante: ${shelf.name}`, content, actions);
+}
+
+
+function renderMeusLivros() {
+    const page = document.getElementById('page-meus-livros');
+    page.innerHTML = `
+        <div class="max-w-4xl mx-auto space-y-8">
+            ${getPageHeader('Meus Livros')}
+            <div class="relative">
+                <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">search</span>
+                <input type="search" id="book-search-input" placeholder="Pesquisar em todos os livros..." class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl py-3 pl-10 pr-4" value="${shelfSearchTerm}">
+            </div>
+            <div id="filter-container"></div>
+            <div id="shelf-content" class="space-y-4"></div>
+            <div id="pagination-controls" class="mt-8"></div>
+        </div>`;
+
+    renderShelfContent();
+
+    const searchInput = document.getElementById('book-search-input');
+    searchInput.oninput = (e) => {
+        shelfSearchTerm = e.target.value;
+        currentPage = 1;
+        renderShelfContent();
+    };
 }
 
 function renderShelfContent() {
     const contentContainer = document.getElementById('shelf-content');
     if (!contentContainer) return;
 
-    const filteredBooks = allBooks.filter(book => {
+    let filteredBooks = allBooks;
+
+    if (shelfSearchTerm) {
+        const lowerCaseSearch = shelfSearchTerm.toLowerCase();
+        filteredBooks = filteredBooks.filter(book =>
+            book.title.toLowerCase().includes(lowerCaseSearch) ||
+            (book.author || '').toLowerCase().includes(lowerCaseSearch)
+        );
+    }
+
+    const counts = {
+        todos: filteredBooks.length,
+        lendo: filteredBooks.filter(b => b.status === 'lendo').length,
+        lido: filteredBooks.filter(b => b.status === 'lido').length,
+        'quero-ler': filteredBooks.filter(b => b.status === 'quero-ler').length,
+        abandonado: filteredBooks.filter(b => b.status === 'abandonado').length,
+        favorito: filteredBooks.filter(b => b.favorite).length,
+        comCapa: filteredBooks.filter(b => b.coverUrl && !b.coverUrl.includes('placehold.co')).length,
+        semCapa: filteredBooks.filter(b => !b.coverUrl || b.coverUrl.includes('placehold.co')).length
+    };
+
+    const filterContainer = document.getElementById('filter-container');
+    const statusMap = { todos: 'Todos', lendo: 'Lendo Agora', lido: 'Lidos', abandonado: 'Abandonados', 'quero-ler': 'Quero Ler', favorito: 'Favoritos', comCapa: 'Com Capa', semCapa: 'Sem Capa' };
+    if (filterContainer) {
+        filterContainer.innerHTML = `<div class="segmented-btn-container flex-wrap flex gap-2">
+            ${Object.keys(statusMap).map(key => `
+                <button data-filter="${key}" class="filter-btn btn-expressive py-2 px-4 h-auto text-sm ${currentFilter === key ? 'active' : ''}">
+                    ${statusMap[key]} (${counts[key] || 0})
+                </button>
+            `).join('')}
+        </div>`;
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.onclick = (e) => {
+                currentFilter = e.currentTarget.dataset.filter;
+                currentPage = 1;
+                renderShelfContent();
+            };
+        });
+    }
+
+    filteredBooks = filteredBooks.filter(book => {
         if (currentFilter === 'todos') return true;
         if (currentFilter === 'favorito') return book.favorite;
-        if (currentFilter === 'comCapa') return !!book.coverUrl;
-        if (currentFilter === 'semCapa') return !book.coverUrl;
+        if (currentFilter === 'comCapa') return book.coverUrl && !book.coverUrl.includes('placehold.co');
+        if (currentFilter === 'semCapa') return !book.coverUrl || book.coverUrl.includes('placehold.co');
         return book.status === currentFilter;
     });
 
     const totalItems = filteredBooks.length;
     const totalPages = itemsPerPage > 0 ? Math.ceil(totalItems / itemsPerPage) : 1;
-    if (currentPage > totalPages && totalPages > 0) {
-        currentPage = totalPages;
-    }
+    if (currentPage > totalPages && totalPages > 0) currentPage = totalPages;
 
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = itemsPerPage > 0 ? startIndex + itemsPerPage : totalItems;
-    const paginatedBooks = filteredBooks.slice(startIndex, endIndex);
+    const paginatedBooks = filteredBooks.slice((currentPage - 1) * itemsPerPage, itemsPerPage > 0 ? ((currentPage - 1) * itemsPerPage) + itemsPerPage : totalItems);
 
     if (paginatedBooks.length > 0) {
         contentContainer.innerHTML = paginatedBooks.map(bookCard).join('');
@@ -524,49 +735,25 @@ function renderShelfContent() {
             <div class="text-center py-20 card-expressive">
                 <span class="material-symbols-outlined text-6xl text-neutral-500 mb-4">search_off</span>
                 <h3 class="text-xl font-bold">Nenhum livro encontrado</h3>
-                <p class="text-neutral-400">Tente um filtro diferente ou adicione um novo livro!</p>
-            </div>
-         `;
+                <p class="text-neutral-400">Tente um filtro ou termo de busca diferente.</p>
+            </div>`;
     }
-
     renderPaginationControls(totalPages, totalItems);
-
-    // O evento de clique agora vai para um link de hash que o router vai interceptar
-    document.querySelectorAll('.book-card-link').forEach(card => {
-        card.href = card.dataset.href;
-    });
-
 }
 
 function bookCard(book) {
-    const ratingHtml = Array.from({ length: 5 }, (_, i) =>
-        `<span class="material-symbols-outlined !text-xl ${i < book.rating ? 'filled text-amber-400' : 'text-neutral-600'}">star</span>`
-    ).join('');
-
-    const feelingsHtml = book.feelings && book.feelings.length > 0
-        ? `<div class="flex flex-wrap gap-1 mt-2 justify-center sm:justify-start">
-            ${book.feelings.slice(0, 5).map(f => `<span class="mood-tag-pill text-xs font-bold px-2 py-0.5 rounded-full capitalize">${f}</span>`).join('')}
-           </div>`
-        : '';
-
-    return `
-        <a data-href="#/book/${book.id}" href="#/book/${book.id}" class="book-card-link card-expressive p-4 flex flex-col sm:flex-row gap-4 no-underline hover:bg-[hsl(var(--md-sys-color-surface-container-highest))]">
-            <div class="w-1/3 sm:w-1/5 flex-shrink-0 mx-auto">
-                <img src="${book.coverUrl || 'https://placehold.co/400x600/171717/FFFFFF?text=Sem+Capa'}" alt="Capa de ${book.title}" class="w-full rounded-lg shadow-lg aspect-[2/3] object-cover">
-            </div>
+    const ratingHtml = Array.from({ length: 5 }, (_, i) => `<span class="material-symbols-outlined !text-xl ${i < book.rating ? 'filled text-amber-400' : 'text-neutral-600'}">star</span>`).join('');
+    const feelingsHtml = book.feelings?.length > 0 ? `<div class="flex flex-wrap gap-1 mt-2 justify-center sm:justify-start">${book.feelings.slice(0, 5).map(f => `<span class="mood-tag-pill text-xs font-bold px-2 py-0.5 rounded-full capitalize">${f}</span>`).join('')}</div>` : '';
+    return `<a href="#/book/${book.id}" class="book-card-link card-expressive p-4 flex flex-col sm:flex-row gap-4 no-underline hover:bg-[hsl(var(--md-sys-color-surface-container-highest))]">
+            <div class="w-1/3 sm:w-1/5 flex-shrink-0 mx-auto"><img src="${getCoverUrl(book)}" alt="Capa de ${book.title}" class="w-full rounded-lg shadow-lg aspect-[2/3] object-cover"></div>
             <div class="flex flex-col flex-grow text-center sm:text-left text-current">
                 <h2 class="font-display text-xl lg:text-2xl title-text-shadow font-bold leading-tight">${book.title}</h2>
                 <p class="text-sm text-neutral-400 mb-2">${book.author || 'Autor desconhecido'}</p>
                 <div class="flex items-center justify-center sm:justify-start gap-1 mb-2">${ratingHtml}</div>
                 ${feelingsHtml}
-                <div class="mt-auto pt-4 flex flex-col sm:flex-row gap-2">
-                     <div class="btn-expressive btn-primary !h-10 !text-sm flex-1 flex items-center justify-center gap-2">
-                        <span class="material-symbols-outlined !text-base">visibility</span>Ver Detalhes
-                    </div>
-                </div>
+                <div class="mt-auto pt-4"><div class="btn-expressive btn-primary !h-10 !text-sm flex-1 flex items-center justify-center gap-2"><span class="material-symbols-outlined !text-base">visibility</span>Ver Detalhes</div></div>
             </div>
-        </a>
-    `;
+        </a>`;
 }
 
 function renderPaginationControls(totalPages, totalItems) {
@@ -601,12 +788,9 @@ function renderPaginationControls(totalPages, totalItems) {
         } else {
             pagesToShow.push(1);
             if (currentPage > 3) pagesToShow.push('...');
-
             let start = Math.max(2, currentPage - 1);
             let end = Math.min(totalPages - 1, currentPage + 1);
-
             for (let i = start; i <= end; i++) pagesToShow.push(i);
-
             if (currentPage < totalPages - 2) pagesToShow.push('...');
             pagesToShow.push(totalPages);
         }
@@ -638,42 +822,23 @@ function renderPaginationControls(totalPages, totalItems) {
     });
 }
 
+
 function renderEstatisticas() {
     const page = document.getElementById('page-estatisticas');
     const readBooks = allBooks.filter(b => b.status === 'lido');
-    const totalPagesRead = readBooks.reduce((sum, b) => {
-        const bookType = b.mediaType || 'fisico';
-        if (bookType === 'fisico' || bookType === 'digital') {
-            const pages = b.totalPages !== undefined ? b.totalPages : b.pages;
-            return sum + (Number(pages) || 0);
-        }
-        return sum;
-    }, 0);
-
+    const totalPagesRead = readBooks.reduce((sum, b) => sum + (Number(b.totalPages || b.pages) || 0), 0);
     const validRatings = readBooks.filter(b => b.rating && b.rating > 0);
-    const avgRating = validRatings.length > 0
-        ? (validRatings.reduce((sum, b) => sum + b.rating, 0) / validRatings.length).toFixed(1)
-        : 'N/A';
+    const avgRating = validRatings.length > 0 ? (validRatings.reduce((sum, b) => sum + b.rating, 0) / validRatings.length).toFixed(1) : 'N/A';
 
     page.innerHTML = `
         <div class="max-w-4xl mx-auto space-y-8">
-            <h1 class="font-display text-5xl md:text-6xl">Estatísticas</h1>
+            ${getPageHeader('Estatísticas')}
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="card-expressive p-6 flex flex-col justify-between">
-                    <h2 class="text-lg font-bold text-neutral-400">Livros Lidos</h2>
-                    <p class="font-display text-6xl text-white">${readBooks.length}</p>
-                </div>
-                <div class="card-expressive p-6 flex flex-col justify-between">
-                    <h2 class="text-lg font-bold text-neutral-400">Páginas Lidas</h2>
-                    <p class="font-display text-6xl text-white">${totalPagesRead.toLocaleString('pt-BR')}</p>
-                </div>
-                <div class="card-expressive p-6 flex flex-col justify-between">
-                    <h2 class="text-lg font-bold text-neutral-400">Média de Estrelas</h2>
-                    <p class="font-display text-6xl text-white">${avgRating}</p>
-                </div>
+                <div class="card-expressive p-6"><h2 class="text-lg font-bold text-neutral-400">Livros Lidos</h2><p class="font-display text-6xl text-white">${readBooks.length}</p></div>
+                <div class="card-expressive p-6"><h2 class="text-lg font-bold text-neutral-400">Páginas Lidas</h2><p class="font-display text-6xl text-white">${totalPagesRead.toLocaleString('pt-BR')}</p></div>
+                <div class="card-expressive p-6"><h2 class="text-lg font-bold text-neutral-400">Média de Estrelas</h2><p class="font-display text-6xl text-white">${avgRating}</p></div>
             </div>
-        </div>
-    `;
+        </div>`;
 }
 
 function renderProfile() {
@@ -684,12 +849,11 @@ function renderProfile() {
         'https://rodcarvalho.com/3.png',
         'https://rodcarvalho.com/4.png'
     ];
-
     const googlePhotoUrl = auth.currentUser?.photoURL;
 
     page.innerHTML = `
         <div class="max-w-2xl mx-auto space-y-8">
-            <h1 class="font-display text-5xl md:text-6xl">Meu Perfil</h1>
+            ${getPageHeader('Meu Perfil')}
             <form id="profile-form" class="space-y-8">
                  <div class="card-expressive p-6">
                     <h2 class="text-xl font-bold mb-4 text-[hsl(var(--md-sys-color-primary))]">Seu Avatar</h2>
@@ -700,8 +864,7 @@ function renderProfile() {
                             <img src="${url}" 
                                  data-url="${url}"
                                  class="avatar-option w-24 h-24 rounded-full object-cover cursor-pointer border-4 border-transparent hover:border-[hsl(var(--md-sys-color-primary))] transition-all
-                                 ${userProfile.avatarUrl === url ? '!border-[hsl(var(--md-sys-color-primary))]' : ''}"
-                            >
+                                 ${userProfile.avatarUrl === url ? '!border-[hsl(var(--md-sys-color-primary))]' : ''}">
                         `).join('')}
                     </div>
                      <p class="text-xs text-neutral-500 mt-4 text-center">Para alterar a sua foto de perfil, <a href="https://myaccount.google.com/" target="_blank" class="text-[hsl(var(--md-sys-color-primary))] hover:underline">atualize na sua Conta Google</a>.</p>
@@ -736,8 +899,7 @@ function renderProfile() {
                     </button>
                 </div>
             </form>
-        </div>
-    `;
+        </div>`;
 
     document.querySelectorAll('.avatar-option').forEach(img => {
         img.onclick = () => {
@@ -749,15 +911,14 @@ function renderProfile() {
 
     document.getElementById('profile-form').onsubmit = (e) => {
         e.preventDefault();
-        const profileData = {
+        saveProfile({
             avatarUrl: document.getElementById('avatarUrl').value,
             name: document.getElementById('profile-name').value,
             pronouns: document.getElementById('profile-pronouns').value,
             blog: document.getElementById('profile-blog').value,
             instagram: document.getElementById('profile-instagram').value,
             youtube: document.getElementById('profile-youtube').value,
-        };
-        saveProfile(profileData);
+        });
     };
 }
 
@@ -767,7 +928,7 @@ function renderSettings() {
 
     page.innerHTML = `
          <div class="max-w-2xl mx-auto space-y-8">
-            <h1 class="font-display text-5xl md:text-6xl">Configurações</h1>
+            ${getPageHeader('Configurações')}
             <div class="card-expressive p-6">
                 <h2 class="text-xl font-bold mb-2 text-[hsl(var(--md-sys-color-primary))]">Aparência</h2>
                 <label for="theme-selector" class="block text-sm font-bold mb-2 text-neutral-300">Tema do Aplicativo</label>
@@ -779,13 +940,9 @@ function renderSettings() {
             <div class="card-expressive p-6">
                 <h2 class="text-xl font-bold mb-2 text-[hsl(var(--md-sys-color-primary))]">Gerenciar Dados</h2>
                 <div class="flex flex-col sm:flex-row gap-4">
-                    <button id="import-csv-btn" class="btn-expressive btn-text flex-1">
-                        <span class="material-symbols-outlined mr-2">upload</span> Importar CSV
-                    </button>
+                    <button id="import-csv-btn" class="btn-expressive btn-text flex-1"><span class="material-symbols-outlined mr-2">upload</span> Importar CSV</button>
                     <input type="file" id="csv-file-input" class="hidden" accept=".csv">
-                    <button id="export-csv-btn" class="btn-expressive btn-text flex-1">
-                       <span class="material-symbols-outlined mr-2">download</span> Exportar CSV
-                    </button>
+                    <button id="export-csv-btn" class="btn-expressive btn-text flex-1"><span class="material-symbols-outlined mr-2">download</span> Exportar CSV</button>
                 </div>
             </div>
 
@@ -800,44 +957,13 @@ function renderSettings() {
                  <p class="text-neutral-300 mb-4">A ação abaixo é irreversível. Tenha certeza do que está fazendo.</p>
                 <button id="delete-all-books-btn" class="btn-expressive bg-red-800/80 hover:bg-red-800 text-white w-full">Deletar Todos os Livros</button>
             </div>
-         </div>
-    `;
+         </div>`;
     document.getElementById('theme-selector').onchange = (e) => applyTheme(e.target.value);
     document.getElementById('import-csv-btn').onclick = () => document.getElementById('csv-file-input').click();
     document.getElementById('csv-file-input').onchange = handleCsvImport;
     document.getElementById('export-csv-btn').onclick = handleCsvExport;
-
-    document.getElementById('logout-btn').onclick = () => {
-        signOut(auth).then(() => {
-            localStorage.removeItem('bookTrackerUserId');
-            localStorage.removeItem('bookTrackerTheme'); // Limpa também o tema local ao sair
-            window.location.href = 'index.html';
-        }).catch((error) => {
-            console.error('Erro ao fazer logout: ', error);
-        });
-    };
-
-    document.getElementById('delete-all-books-btn').onclick = () => {
-        showModal(
-            'Confirmar Exclusão Total',
-            `Tem certeza que deseja excluir <strong>TODOS</strong> os seus livros? Esta ação não pode ser desfeita.`,
-            [{
-                id: 'confirm-delete-all-btn',
-                text: 'Sim, Excluir Tudo',
-                class: 'bg-red-600 text-white',
-                onClick: () => {
-                    deleteAllBooks();
-                },
-                keepOpen: false
-            }, {
-                id: 'modal-close-btn',
-                text: 'Cancelar',
-                class: 'btn-text',
-                onClick: hideModal,
-                keepOpen: true
-            }]
-        );
-    };
+    document.getElementById('logout-btn').onclick = () => { signOut(auth).then(() => { localStorage.clear(); window.location.href = 'index.html'; }); };
+    document.getElementById('delete-all-books-btn').onclick = () => { showModal('Confirmar Exclusão Total', 'Tem certeza?', [{ id: 'confirm-delete-all-btn', text: 'Sim, Excluir Tudo', class: 'bg-red-600 text-white', onClick: deleteAllBooks }]); };
 }
 
 async function renderFormInModal(bookId = null) {
@@ -851,6 +977,7 @@ async function renderFormInModal(bookId = null) {
     }
 
     const selectedFeelings = book.feelings || [];
+    const bookShelves = book.shelves || [];
 
     const formHtml = `
         <div class="card-expressive w-full max-w-5xl max-h-[90vh] flex flex-col relative">
@@ -861,127 +988,44 @@ async function renderFormInModal(bookId = null) {
                     <input type="hidden" id="bookId" value="${book.id || ''}">
                     
                     <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div class="md:col-span-2">
-                            <label for="title" class="block text-sm font-bold mb-2 text-neutral-300">Título</label>
-                            <div class="flex items-center gap-2">
-                                <input type="text" id="title" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0" value="${book.title || ''}" required>
-                                <button type="button" id="metadata-search-btn" class="btn-expressive btn-tonal h-auto py-2 px-3 shrink-0">Procurar Edição</button>
-                            </div>
+                        <div class="md:col-span-2"><label for="title" class="block text-sm font-bold mb-2 text-neutral-300">Título</label><div class="flex items-center gap-2"><input type="text" id="title" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.title || ''}" required><button type="button" id="metadata-search-btn" class="btn-expressive btn-tonal h-auto py-2 px-3 shrink-0">Procurar</button></div></div>
+                        <div class="md:col-span-2 flex justify-center"><div id="cover-preview-container" class="mt-4">${book.coverUrl ? `<img src="${getCoverUrl(book)}" class="w-32 rounded-lg shadow-md">` : ''}</div></div>
+                        <div><label for="author" class="block text-sm font-bold mb-2 text-neutral-300">Autor</label><input type="text" id="author" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.author || ''}" required></div>
+                        <div><label for="isbn" class="block text-sm font-bold mb-2 text-neutral-300">ISBN</label><input type="text" id="isbn" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.isbn || ''}"></div>
+                        <div class="md:col-span-2"><label for="coverUrl" class="block text-sm font-bold mb-2 text-neutral-300">URL da Capa</label><input type="url" id="coverUrl" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.coverUrl || ''}"></div>
+                    </div>
+                    
+                    <div class="card-expressive p-6 space-y-4">
+                        <h3 class="text-xl font-bold text-[hsl(var(--md-sys-color-primary))]">Estantes</h3>
+                        <div id="shelf-selection-container" class="max-h-40 overflow-y-auto space-y-2 pr-2">
+                            ${userShelves.length > 0 ? userShelves.map(shelf => `<label class="flex items-center gap-3 p-2 rounded-lg hover:bg-neutral-800/50 cursor-pointer"><input type="checkbox" name="shelves" value="${shelf.id}" class="h-5 w-5 rounded bg-neutral-700 border-neutral-600 text-[hsl(var(--md-sys-color-primary))] focus:ring-0" ${bookShelves.includes(shelf.id) ? 'checked' : ''}><span>${shelf.name}</span></label>`).join('') : '<p class="text-neutral-400">Nenhuma estante criada ainda.</p>'}
                         </div>
-                        <div class="md:col-span-2 flex justify-center">
-                             <div id="cover-preview-container" class="mt-4">
-                                ${book.coverUrl ? `<img src="${book.coverUrl}" class="w-32 rounded-lg shadow-md">` : ''}
-                             </div>
-                        </div>
-                        <div>
-                            <label for="author" class="block text-sm font-bold mb-2 text-neutral-300">Autor</label>
-                            <input type="text" id="author" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.author || ''}" required>
-                        </div>
-                         <div>
-                            <label for="isbn" class="block text-sm font-bold mb-2 text-neutral-300">ISBN</label>
-                            <input type="text" id="isbn" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.isbn || ''}">
-                        </div>
-                        <div class="md:col-span-2">
-                            <label for="coverUrl" class="block text-sm font-bold mb-2 text-neutral-300">URL da Capa</label>
-                            <input type="url" id="coverUrl" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.coverUrl || ''}">
-                        </div>
+                        <div class="flex items-center gap-2 pt-2 border-t border-neutral-700/50"><input type="text" id="new-shelf-name-inline" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-2 text-sm" placeholder="Nome da nova estante"><button type="button" id="add-new-shelf-inline-btn" class="btn-expressive btn-tonal !h-auto !py-2 !px-3 !text-xs">Criar e Adicionar</button></div>
                     </div>
 
-                    <div class="card-expressive p-6 space-y-4">
-                        <h3 class="text-xl font-bold text-[hsl(var(--md-sys-color-primary))]">Como este livro te fez sentir?</h3>
-                        <p class="text-neutral-400 text-sm">Selecione até 5 sentimentos.</p>
-                        <div id="feelings-container" class="flex flex-wrap gap-2">
-                            ${sentimentos.map(s => `
-                                <button type="button" data-feeling="${s}" class="mood-tag-btn btn-expressive !py-1 !px-3 !h-auto !text-xs capitalize ${selectedFeelings.includes(s) ? 'selected' : ''}">
-                                    ${s}
-                                </button>
-                            `).join('')}
-                        </div>
-                        <input type="hidden" id="feelingsValue" value="${selectedFeelings.join(',') || ''}">
-                    </div>
+                    <div class="card-expressive p-6 space-y-4"><h3 class="text-xl font-bold text-[hsl(var(--md-sys-color-primary))]">Como este livro te fez sentir?</h3><div id="feelings-container" class="flex flex-wrap gap-2">${sentimentos.map(s => `<button type="button" data-feeling="${s}" class="mood-tag-btn btn-expressive !py-1 !px-3 !h-auto !text-xs capitalize ${selectedFeelings.includes(s) ? 'selected' : ''}">${s}</button>`).join('')}</div><input type="hidden" id="feelingsValue" value="${selectedFeelings.join(',') || ''}"></div>
 
                     <div class="card-expressive p-6">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-                             <div>
-                                <label for="status" class="block text-sm font-bold mb-2 text-neutral-300">Status</label>
-                                <select id="status" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0">
-                                    <option value="quero-ler" ${book.status === 'quero-ler' ? 'selected' : ''}>Quero Ler</option>
-                                    <option value="lendo" ${book.status === 'lendo' ? 'selected' : ''}>Lendo Agora</option>
-                                    <option value="lido" ${book.status === 'lido' ? 'selected' : ''}>Lido</option>
-                                    <option value="abandonado" ${book.status === 'abandonado' ? 'selected' : ''}>Abandonado</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-bold mb-2 text-neutral-300">Avaliação & Favorito</label>
-                                <div class="flex items-center gap-4">
-                                    <div id="rating" class="flex items-center gap-1">
-                                        ${[1, 2, 3, 4, 5].map(i => `<span class="material-symbols-outlined star-icon !text-3xl cursor-pointer transition-colors ${Number(book.rating) >= i ? 'filled text-amber-400' : 'text-neutral-600'}" data-value="${i}">star</span>`).join('')}
-                                    </div>
-                                    <input type="hidden" id="ratingValue" value="${book.rating || 0}">
-                                    <button type="button" id="favorite-btn" class="text-neutral-500 hover:text-red-500 transition-colors">
-                                        <span class="material-symbols-outlined !text-3xl ${book.favorite ? 'filled text-red-500' : ''}">favorite</span>
-                                    </button>
-                                    <input type="hidden" id="favoriteValue" value="${book.favorite ? 'true' : 'false'}">
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <label for="startDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Início</label>
-                                <input type="date" id="startDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.startDate || ''}">
-                            </div>
-                            <div>
-                                <label for="endDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Conclusão</label>
-                                <input type="date" id="endDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.endDate || ''}">
-                            </div>
-
-                            <div class="md:col-span-2 grid grid-cols-3 gap-4">
-                                <label for="media-type-fisico" class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] has-[:checked]:text-[hsl(var(--md-sys-color-on-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]">
-                                    <span class="material-symbols-outlined mb-1">auto_stories</span>
-                                    <span class="block text-sm font-bold">Físico</span>
-                                    <input type="radio" name="mediaType" id="media-type-fisico" value="fisico" ${!book.mediaType || book.mediaType === 'fisico' ? 'checked' : ''} class="sr-only">
-                                </label>
-                                 <label for="media-type-digital" class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] has-[:checked]:text-[hsl(var(--md-sys-color-on-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]">
-                                     <span class="material-symbols-outlined mb-1">tablet_mac</span>
-                                     <span class="block text-sm font-bold">Digital</span>
-                                    <input type="radio" name="mediaType" id="media-type-digital" value="digital" ${book.mediaType === 'digital' ? 'checked' : ''} class="sr-only">
-                                </label>
-                                 <label for="media-type-audiobook" class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] has-[:checked]:text-[hsl(var(--md-sys-color-on-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]">
-                                     <span class="material-symbols-outlined mb-1">headphones</span>
-                                     <span class="block text-sm font-bold">Audiolivro</span>
-                                    <input type="radio" name="mediaType" id="media-type-audiobook" value="audiobook" ${book.mediaType === 'audiobook' ? 'checked' : ''} class="sr-only">
-                                </label>
-                            </div>
-                            <div id="total-pages-container" class="md:col-span-1">
-                                <label for="totalPages" class="block text-sm font-bold mb-2 text-neutral-300">Nº de Páginas</label>
-                                <input type="number" id="totalPages" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.totalPages || book.pages || ''}">
-                            </div>
-                            <div id="total-time-container" class="hidden md:col-span-1">
-                                <label for="totalTime" class="block text-sm font-bold mb-2 text-neutral-300">Tempo Total (HH:MM:SS)</label>
-                                <input type="text" id="totalTime" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.totalTime || ''}" placeholder="01:30:00">
-                            </div>
+                             <div><label for="status" class="block text-sm font-bold mb-2 text-neutral-300">Status</label><select id="status" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3"><option value="quero-ler" ${book.status === 'quero-ler' ? 'selected' : ''}>Quero Ler</option><option value="lendo" ${book.status === 'lendo' ? 'selected' : ''}>Lendo Agora</option><option value="lido" ${book.status === 'lido' ? 'selected' : ''}>Lido</option><option value="abandonado" ${book.status === 'abandonado' ? 'selected' : ''}>Abandonado</option></select></div>
+                             <div><label class="block text-sm font-bold mb-2 text-neutral-300">Avaliação & Favorito</label><div class="flex items-center gap-4"><div id="rating" class="flex items-center gap-1">${[1, 2, 3, 4, 5].map(i => `<span class="material-symbols-outlined star-icon !text-3xl cursor-pointer transition-colors ${Number(book.rating) >= i ? 'filled text-amber-400' : 'text-neutral-600'}" data-value="${i}">star</span>`).join('')}</div><input type="hidden" id="ratingValue" value="${book.rating || 0}"><button type="button" id="favorite-btn" class="text-neutral-500 hover:text-red-500 transition-colors"><span class="material-symbols-outlined !text-3xl ${book.favorite ? 'filled text-red-500' : ''}">favorite</span></button><input type="hidden" id="favoriteValue" value="${book.favorite ? 'true' : 'false'}"></div></div>
+                             <div><label for="startDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Início</label><input type="date" id="startDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.startDate || ''}"></div>
+                             <div><label for="endDate" class="block text-sm font-bold mb-2 text-neutral-300">Data de Conclusão</label><input type="date" id="endDate" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.endDate || ''}"></div>
+                             <div class="md:col-span-2 grid grid-cols-3 gap-4"><label class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]"><span class="material-symbols-outlined mb-1">auto_stories</span><span class="block text-sm font-bold">Físico</span><input type="radio" name="mediaType" value="fisico" ${!book.mediaType || book.mediaType === 'fisico' ? 'checked' : ''} class="sr-only"></label><label class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]"><span class="material-symbols-outlined mb-1">tablet_mac</span><span class="block text-sm font-bold">Digital</span><input type="radio" name="mediaType" value="digital" ${book.mediaType === 'digital' ? 'checked' : ''} class="sr-only"></label><label class="text-center cursor-pointer p-3 rounded-xl has-[:checked]:bg-[hsl(var(--md-sys-color-primary-container))] border-2 border-transparent has-[:checked]:border-[hsl(var(--md-sys-color-primary))]"><span class="material-symbols-outlined mb-1">headphones</span><span class="block text-sm font-bold">Audiolivro</span><input type="radio" name="mediaType" value="audiobook" ${book.mediaType === 'audiobook' ? 'checked' : ''} class="sr-only"></label></div>
+                             <div id="total-pages-container" class="md:col-span-1"><label for="totalPages" class="block text-sm font-bold mb-2 text-neutral-300">Nº de Páginas</label><input type="number" id="totalPages" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.totalPages || book.pages || ''}"></div>
+                             <div id="total-time-container" class="hidden md:col-span-1"><label for="totalTime" class="block text-sm font-bold mb-2 text-neutral-300">Tempo Total (HH:MM)</label><input type="text" id="totalTime" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.totalTime || ''}" placeholder="01:30"></div>
                         </div>
                     </div>
                     
                     <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label for="synopsis" class="block text-sm font-bold mb-2 text-neutral-300">Sinopse</label>
-                             <textarea id="synopsis" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.synopsis || ''}</textarea>
-                        </div>
-                        <div>
-                            <label for="review" class="block text-sm font-bold mb-2 text-neutral-300">Minha Resenha</label>
-                            <textarea id="review" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.review || ''}</textarea>
-                        </div>
-                        <div class="md:col-span-2">
-                           <label for="categories" class="block text-sm font-bold mb-2 text-neutral-300">Categorias (separadas por vírgula)</label>
-                           <input type="text" id="categories" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.categories || ''}">
-                       </div>
+                        <div><label for="synopsis" class="block text-sm font-bold mb-2 text-neutral-300">Sinopse</label><textarea id="synopsis" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.synopsis || ''}</textarea></div>
+                        <div><label for="review" class="block text-sm font-bold mb-2 text-neutral-300">Minha Resenha</label><textarea id="review" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.review || ''}</textarea></div>
+                        <div class="md:col-span-2"><label for="categories" class="block text-sm font-bold mb-2 text-neutral-300">Categorias (separadas por vírgula)</label><input type="text" id="categories" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.categories || ''}"></div>
                     </div>
                     
                     <div class="flex items-center justify-end gap-4 pt-4">
                          <button type="button" class="btn-expressive btn-text" id="form-cancel-btn">Cancelar</button>
-                        <button type="submit" class="btn-expressive btn-primary">
-                            <span class="material-symbols-outlined mr-2">save</span> ${isEditing ? 'Salvar Alterações' : 'Adicionar Livro'}
-                        </button>
+                        <button type="submit" class="btn-expressive btn-primary"><span class="material-symbols-outlined mr-2">save</span> ${isEditing ? 'Salvar Alterações' : 'Adicionar Livro'}</button>
                     </div>
                 </form>
             </div>
@@ -991,7 +1035,6 @@ async function renderFormInModal(bookId = null) {
     modalContent.innerHTML = formHtml;
     modalContainer.classList.remove('hidden');
 
-    // Adiciona listener para fechar o modal, mas impede que o clique no conteúdo o feche
     document.getElementById('modal-close-btn').onclick = hideModal;
     modalContainer.onclick = hideModal;
     modalContent.firstElementChild.onclick = (e) => e.stopPropagation();
@@ -1001,87 +1044,41 @@ async function renderFormInModal(bookId = null) {
 }
 
 function setupFormListeners(container = document) {
-    // Rating stars logic
     const stars = container.querySelectorAll('.star-icon');
-    stars.forEach(star => {
-        star.onclick = () => {
-            const rating = star.dataset.value;
-            container.getElementById('ratingValue').value = rating;
-            stars.forEach(s => {
-                s.classList.toggle('filled', s.dataset.value <= rating);
-                s.classList.toggle('text-amber-400', s.dataset.value <= rating);
-                s.classList.toggle('text-neutral-600', s.dataset.value > rating);
-            });
-        };
-    });
-
-    // Favorite button logic
+    stars.forEach(star => { star.onclick = () => { const rating = star.dataset.value; container.getElementById('ratingValue').value = rating; stars.forEach(s => { s.classList.toggle('filled', s.dataset.value <= rating); s.classList.toggle('text-amber-400', s.dataset.value <= rating); s.classList.toggle('text-neutral-600', s.dataset.value > rating); }); }; });
     const favBtn = container.querySelector('#favorite-btn');
-    const favValueInput = container.querySelector('#favoriteValue');
-    favBtn.onclick = () => {
-        const isFavorite = favValueInput.value === 'true';
-        favValueInput.value = !isFavorite;
-        favBtn.querySelector('span').classList.toggle('filled', !isFavorite);
-        favBtn.querySelector('span').classList.toggle('text-red-500', !isFavorite);
-    };
-
-    // Media type toggle logic
+    favBtn.onclick = () => { const isFavorite = container.querySelector('#favoriteValue').value === 'true'; container.querySelector('#favoriteValue').value = !isFavorite; favBtn.querySelector('span').classList.toggle('filled', !isFavorite); favBtn.querySelector('span').classList.toggle('text-red-500', !isFavorite); };
+    const feelingsContainer = container.querySelector('#feelings-container');
+    if (feelingsContainer) { feelingsContainer.addEventListener('click', (e) => { if (e.target.matches('.mood-tag-btn')) { e.preventDefault(); const btn = e.target; const feeling = btn.dataset.feeling; let selectedFeelings = container.querySelector('#feelingsValue').value ? container.querySelector('#feelingsValue').value.split(',').filter(f => f) : []; if (selectedFeelings.includes(feeling)) { selectedFeelings = selectedFeelings.filter(f => f !== feeling); btn.classList.remove('selected'); } else { if (selectedFeelings.length < 5) { selectedFeelings.push(feeling); btn.classList.add('selected'); } } container.querySelector('#feelingsValue').value = selectedFeelings.join(','); } }); }
     const mediaTypeRadios = container.querySelectorAll('input[name="mediaType"]');
-    const pagesContainer = container.querySelector('#total-pages-container');
-    const timeContainer = container.querySelector('#total-time-container');
-
-    function toggleMediaFields() {
-        const selectedType = container.querySelector('input[name="mediaType"]:checked').value;
-        if (selectedType === 'audiobook') {
-            pagesContainer.classList.add('hidden');
-            timeContainer.classList.remove('hidden');
-        } else {
-            pagesContainer.classList.remove('hidden');
-            timeContainer.classList.add('hidden');
-            pagesContainer.querySelector('label').textContent = 'Nº de Páginas';
-            pagesContainer.querySelector('input').placeholder = '';
-        }
-    }
+    function toggleMediaFields() { const selectedType = container.querySelector('input[name="mediaType"]:checked').value; container.querySelector('#total-pages-container').classList.toggle('hidden', selectedType === 'audiobook'); container.querySelector('#total-time-container').classList.toggle('hidden', selectedType !== 'audiobook'); }
     mediaTypeRadios.forEach(radio => radio.onchange = toggleMediaFields);
     toggleMediaFields();
 
-    // Feelings/Moods selection logic
-    const feelingsContainer = container.querySelector('#feelings-container');
-    const feelingsValueInput = container.querySelector('#feelingsValue');
-    if (feelingsContainer) {
-        feelingsContainer.addEventListener('click', (e) => {
-            if (e.target.matches('.mood-tag-btn')) {
-                e.preventDefault();
-                const btn = e.target;
-                const feeling = btn.dataset.feeling;
-                let selectedFeelings = feelingsValueInput.value ? feelingsValueInput.value.split(',').filter(f => f) : [];
-
-                if (selectedFeelings.includes(feeling)) {
-                    selectedFeelings = selectedFeelings.filter(f => f !== feeling);
-                    btn.classList.remove('selected');
-                } else {
-                    if (selectedFeelings.length < 5) {
-                        selectedFeelings.push(feeling);
-                        btn.classList.add('selected');
-                    } else {
-                        // Optional: Show a message that the limit is 5
-                        console.warn("Limit of 5 feelings reached.");
-                        alert("Você pode selecionar no máximo 5 sentimentos.");
-                    }
+    const addNewShelfBtn = container.querySelector('#add-new-shelf-inline-btn');
+    if (addNewShelfBtn) {
+        addNewShelfBtn.onclick = async () => {
+            const input = container.querySelector('#new-shelf-name-inline');
+            const newShelfName = input.value.trim();
+            if (newShelfName) {
+                const newShelfId = await saveShelf({ name: newShelfName });
+                if (newShelfId) {
+                    const shelfSelectionContainer = container.querySelector('#shelf-selection-container');
+                    const newCheckboxHtml = `<label class="flex items-center gap-3 p-2 rounded-lg hover:bg-neutral-800/50 cursor-pointer"><input type="checkbox" name="shelves" value="${newShelfId}" class="h-5 w-5 rounded" checked><span>${newShelfName}</span></label>`;
+                    const noShelfMsg = shelfSelectionContainer.querySelector('p');
+                    if (noShelfMsg) noShelfMsg.remove();
+                    shelfSelectionContainer.insertAdjacentHTML('beforeend', newCheckboxHtml);
+                    input.value = '';
                 }
-                feelingsValueInput.value = selectedFeelings.join(',');
             }
-        });
+        };
     }
 
-
-    // Form submission logic
     container.querySelector('#book-form').onsubmit = async (e) => {
         e.preventDefault();
-        const bookId = container.querySelector('#bookId').value || null;
-
+        const selectedShelves = Array.from(container.querySelectorAll('input[name="shelves"]:checked')).map(cb => cb.value);
         const bookData = {
-            id: bookId,
+            id: container.querySelector('#bookId').value || null,
             title: container.querySelector('#title').value,
             author: container.querySelector('#author').value,
             status: container.querySelector('#status').value,
@@ -1098,56 +1095,45 @@ function setupFormListeners(container = document) {
             totalPages: Number(container.querySelector('#totalPages').value) || 0,
             totalTime: container.querySelector('#totalTime').value || '',
             feelings: container.querySelector('#feelingsValue').value ? container.querySelector('#feelingsValue').value.split(',').filter(f => f) : [],
+            shelves: selectedShelves,
         };
 
         showLoading("Salvando...");
-        const savedBookId = await saveBook(bookData);
-        hideModal(); // Fecha o modal do formulário
+        await saveBook(bookData);
+        hideModal();
     };
 
+    container.querySelector('#form-cancel-btn').onclick = hideModal;
     container.querySelector('#metadata-search-btn').onclick = () => handleMetadataSearch(container);
 }
+
 
 async function renderDetailsInModal(bookId) {
     const modalContainer = document.getElementById('modal-container');
     const modalContent = document.getElementById('modal-content');
     let book = allBooks.find(b => b.id === bookId);
-
-    if (!book && userId && bookId) {
-        try {
-            const docRef = doc(db, "users", userId, "books", bookId);
-            const docSnap = await getDoc(docRef);
-            if (docSnap.exists()) {
-                book = { id: docSnap.id, ...docSnap.data() };
-            }
-        } catch (error) {
-            console.error("Error fetching single book:", error);
-        }
-    }
-
-
-    if (!book) {
-        showModal('Erro', 'Livro não encontrado.');
-        window.location.hash = '#/estante';
-        return;
-    }
+    if (!book) { hideModal(); return; }
 
     const ratingHtml = book.rating ? Array.from({ length: 5 }, (_, i) => `<span class="material-symbols-outlined text-amber-400 !text-3xl ${i < book.rating ? 'filled' : ''}">star</span>`).join('') : '<span class="text-neutral-400">Sem avaliação</span>';
     const statusDisplay = { 'lido': 'Lido', 'lendo': 'Lendo Agora', 'quero-ler': 'Quero Ler', 'abandonado': 'Abandonado' }[book.status] || 'Sem status';
-
     let totalDisplay = '';
     const bookType = book.mediaType || 'fisico';
+    if (bookType === 'fisico' || bookType === 'digital') { totalDisplay = `${book.totalPages || '?'} páginas`; }
+    else if (bookType === 'audiobook') { totalDisplay = `${book.totalTime || '?'} de áudio`; }
 
-    if (bookType === 'fisico' || bookType === 'digital') {
-        const pages = book.totalPages !== undefined ? book.totalPages : book.pages;
-        totalDisplay = `${pages || '?'} páginas`;
-        if (bookType === 'digital') totalDisplay = 'E-book';
-    } else if (bookType === 'audiobook') {
-        totalDisplay = `${book.totalTime || '?'} de áudio`;
-    }
+    const feelingsHtml = book.feelings?.length > 0 ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Como este livro me fez sentir</h3><div class="flex flex-wrap gap-2">${book.feelings.map(f => `<span class="mood-tag-pill text-sm font-bold px-3 py-1 rounded-full capitalize">${f}</span>`).join('')}</div></div>` : '';
 
-    const feelingsHtml = book.feelings && book.feelings.length > 0
-        ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Como este livro me fez sentir</h3><div class="flex flex-wrap gap-2">${book.feelings.map(f => `<span class="mood-tag-pill text-sm font-bold px-3 py-1 rounded-full capitalize">${f}</span>`).join('')}</div></div>`
+    const bookShelves = book.shelves || [];
+    const shelvesHtml = bookShelves.length > 0
+        ? `<div class="card-expressive p-6">
+               <h3 class="text-xl font-bold mb-4">Estantes</h3>
+               <div class="flex flex-wrap gap-2">
+                   ${bookShelves.map(shelfId => {
+            const shelf = userShelves.find(s => s.id === shelfId);
+            return shelf ? `<span class="bg-[hsla(var(--md-sys-color-primary),0.2)] text-[hsl(var(--md-sys-color-primary))] text-xs font-bold mr-2 px-2.5 py-1 rounded-full">${shelf.name}</span>` : '';
+        }).join('')}
+               </div>
+           </div>`
         : '';
 
     const detailHTML = `
@@ -1155,9 +1141,7 @@ async function renderDetailsInModal(bookId) {
             <button id="modal-close-btn" class="absolute top-4 right-5 text-neutral-400 hover:text-white text-4xl leading-none z-10">&times;</button>
             <div class="p-6 md:p-8 flex-grow overflow-y-auto">
                 <div class="flex flex-col sm:flex-row gap-8 md:gap-12">
-                    <div class="w-1/3 sm:w-1/5 mx-auto flex-shrink-0">
-                        <img src="${book.coverUrl || 'https://placehold.co/400x600/171717/FFFFFF?text=Sem+Capa'}" alt="Capa de ${book.title}" class="w-full rounded-2xl shadow-2xl" onerror="this.onerror=null;this.src='https://placehold.co/400x600/171717/FFFFFF?text=Capa+Inv%C3%A1lida';">
-                    </div>
+                    <div class="w-1/3 sm:w-1/5 mx-auto flex-shrink-0"><img src="${getCoverUrl(book)}" alt="Capa de ${book.title}" class="w-full rounded-2xl shadow-2xl"></div>
                     <div class="w-full sm:w-2/3 flex flex-col">
                         <h1 class="font-display text-3xl md:text-5xl lg:text-6xl mb-2">${book.title}</h1>
                         <h2 class="text-xl md:text-3xl text-neutral-300 mb-6">${book.author}</h2>
@@ -1166,16 +1150,17 @@ async function renderDetailsInModal(bookId) {
                             <span class="bg-neutral-800 text-neutral-300 font-bold py-1 px-3 rounded-full">${statusDisplay}</span>
                             <span class="bg-neutral-800 text-neutral-300 font-bold py-1 px-3 rounded-full">${totalDisplay}</span>
                         </div>
-                         <div class="flex flex-wrap gap-2 mb-8">${book.categories ? book.categories.split(',').map(cat => `<span class="bg-[hsla(var(--md-sys-color-primary),0.2)] text-[hsl(var(--md-sys-color-primary))] text-xs font-bold mr-2 px-2.5 py-1 rounded-full">${cat.trim()}</span>`).join('') : ''}</div>
                          <div class="mt-auto flex flex-col sm:flex-row gap-4">
-                            <a href="#/edit/${book.id}" class="btn-expressive btn-primary flex-1 !h-11 !text-sm"><span class="material-symbols-outlined mr-2">edit</span> Editar</a>
-                            <button id="delete-book-btn" class="btn-expressive !h-11 !text-sm bg-red-900/60 text-red-300 hover:bg-red-800"><span class="material-symbols-outlined">delete</span></button>
+                            <a href="#/edit/${book.id}" class="btn-expressive btn-primary flex-1"><span class="material-symbols-outlined mr-2">edit</span>Editar</a>
+                            <button id="quick-add-to-shelf-btn" class="btn-expressive btn-tonal"><span class="material-symbols-outlined mr-2">add_circle</span>Adic. à Estante</button>
+                            <button id="delete-book-btn" class="btn-expressive bg-red-900/60 text-red-300 hover:bg-red-800"><span class="material-symbols-outlined">delete</span></button>
                         </div>
                     </div>
                 </div>
                 
                 <div class="mt-8 space-y-6">
                     ${book.status === 'lendo' ? renderProgressUpdater(book) : ''}
+                     ${shelvesHtml}
                      ${book.synopsis ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Sinopse</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.synopsis}</p></div>` : ''}
                      ${book.review ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Minha Resenha</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.review}</p></div>` : ''}
                      ${feelingsHtml}
@@ -1187,74 +1172,52 @@ async function renderDetailsInModal(bookId) {
     modalContent.innerHTML = detailHTML;
     modalContainer.classList.remove('hidden');
 
-    // Adiciona funcionalidade aos botões dentro do modal
     modalContent.querySelector('#modal-close-btn').onclick = hideModal;
     modalContainer.onclick = hideModal;
     modalContent.firstElementChild.onclick = (e) => e.stopPropagation();
-
-
-    modalContent.querySelector('#delete-book-btn').onclick = () => showModal('Confirmar Exclusão', `Tem certeza que deseja excluir o livro "<strong>${book.title}</strong>"? Esta ação não pode ser desfeita.`, [{ id: 'confirm-delete-btn', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteBook(book.id) }]);
+    modalContent.querySelector('#delete-book-btn').onclick = () => showModal('Confirmar Exclusão', `Tem certeza que deseja excluir o livro "<strong>${book.title}</strong>"?`, [{ id: 'confirm-delete-btn', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteBook(book.id) }]);
+    modalContent.querySelector('#quick-add-to-shelf-btn').onclick = () => showQuickShelfManager(book);
 
     if (book.status === 'lendo') {
         modalContent.querySelector('#update-progress-btn').onclick = () => {
-            const progressInput = modalContent.querySelector('#progress-input');
-            let progressValue = progressInput.value;
-            if (book.mediaType === 'audiobook') {
-                const parts = progressValue.split(':');
-                progressValue = (+parts[0]) * 3600 + (+parts[1]) * 60 + (+parts[2]);
-            }
+            const progressValue = modalContent.querySelector('#progress-input').value;
             updateBookProgress(book.id, Number(progressValue));
         }
-        const progressInput = modalContent.querySelector('#progress-input');
-        progressInput.oninput = () => {
-            let isComplete = false;
-            const bookType = book.mediaType || 'fisico';
-
-            if (bookType === 'fisico' || bookType === 'digital') {
-                const total = book.totalPages !== undefined ? book.totalPages : book.pages;
-                isComplete = total && Number(progressInput.value) >= total;
-            } else if (bookType === 'audiobook') {
-                if (progressInput.value && book.totalTime) {
-                    const currentParts = progressInput.value.split(':');
-                    const totalParts = book.totalTime.split(':');
-                    if (currentParts.length === 3 && totalParts.length === 3) {
-                        const currentSeconds = (+currentParts[0]) * 3600 + (+currentParts[1]) * 60 + (+currentParts[2]);
-                        const totalSeconds = (+totalParts[0]) * 3600 + (+totalParts[1]) * 60 + (+totalParts[2]);
-                        isComplete = currentSeconds >= totalSeconds;
-                    }
-                }
-            }
-            modalContent.querySelector('#mark-as-read-btn').classList.toggle('hidden', !isComplete);
-        };
-        modalContent.querySelector('#mark-as-read-btn').onclick = () => markBookAsRead(book.id);
     }
     document.addEventListener('keydown', handleEscKey);
 }
 
+function showQuickShelfManager(book) {
+    const bookShelves = book.shelves || [];
+    const content = `
+        <div id="quick-shelf-selection" class="max-h-60 overflow-y-auto space-y-2 pr-2">
+            ${userShelves.map(shelf => `
+                <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-neutral-800/50 cursor-pointer">
+                    <input type="checkbox" name="quick-shelves" value="${shelf.id}" class="h-5 w-5 rounded" ${bookShelves.includes(shelf.id) ? 'checked' : ''}>
+                    <span>${shelf.name}</span>
+                </label>
+            `).join('')}
+        </div>
+    `;
+    const actions = [{
+        id: 'save-quick-shelves', text: 'Salvar', class: 'btn-primary', onClick: async () => {
+            const selectedShelves = Array.from(document.querySelectorAll('input[name="quick-shelves"]:checked')).map(cb => cb.value);
+            showLoading("Salvando...");
+            await updateDoc(doc(db, "users", userId, "books", book.id), { shelves: selectedShelves });
+            hideModal();
+            renderDetailsInModal(book.id);
+        }
+    }];
+    showModal('Adicionar/Remover de Estantes', content, actions);
+}
+
+
 function renderProgressUpdater(book) {
     let label, value, max, step, type, placeholder;
-
     const bookType = book.mediaType || 'fisico';
-    type = 'number';
-    placeholder = '';
-    step = 1;
-    max = '';
-
-    if (bookType === 'fisico' || bookType === 'digital') {
-        const total = book.totalPages !== undefined ? book.totalPages : book.pages;
-        label = `Página Atual (de ${total || '?'})`;
-        value = book.currentProgress || 0;
-        max = total || '';
-    } else if (bookType === 'audiobook') {
-        label = `Tempo Ouvido (de ${book.totalTime || '??:??:??'})`;
-        const s = book.currentProgress || 0;
-        value = new Date(s * 1000).toISOString().slice(11, 19);
-        type = 'text';
-        placeholder = 'HH:MM:SS';
-        max = undefined;
-        step = undefined;
-    }
-
+    type = 'number'; placeholder = ''; step = 1; max = '';
+    if (bookType === 'fisico' || bookType === 'digital') { const total = book.totalPages || book.pages; label = `Página Atual (de ${total || '?'})`; value = book.currentProgress || 0; max = total || ''; }
+    else if (bookType === 'audiobook') { label = `Tempo Ouvido (de ${book.totalTime || '??:??:??'})`; const s = book.currentProgress || 0; value = new Date(s * 1000).toISOString().slice(11, 19); type = 'text'; placeholder = 'HH:MM:SS'; }
     return `
          <div class="card-expressive p-6 mb-8">
             <h3 class="text-xl font-bold mb-4">Atualizar Leitura</h3>
@@ -1274,167 +1237,95 @@ function renderProgressUpdater(book) {
 
 async function handleMetadataSearch(container = document) {
     const title = container.querySelector('#title').value;
-    if (!title) {
-        showModal("Falta o Título", "Por favor, insira um título de livro para buscar os dados.", []);
-        return;
-    }
-    if (!GOOGLE_BOOKS_API_KEY || GOOGLE_BOOKS_API_KEY === "SUA_CHAVE_DE_API_AQUI") {
-        showModal("API Key Faltando", "Por favor, adicione sua chave da Google Books API no ficheiro app.js.", []);
-        return;
-    }
-
+    if (!title) { showModal("Falta o Título", "Por favor, insira um título."); return; }
     showLoading('A procurar edições...');
     const query = encodeURIComponent(`intitle:${title}`);
     const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&key=${GOOGLE_BOOKS_API_KEY}&maxResults=40`;
-
     try {
         const response = await fetch(url);
         const data = await response.json();
-
         if (data.items && data.items.length > 0) {
             apiSearchResults = data.items;
             currentApiResultIndex = 0;
             showApiResultsModal();
         } else {
             hideModal();
-            showModal("Nenhum Resultado", "Nenhum livro foi encontrado com este título.", []);
+            showModal("Nenhum Resultado", "Nenhum livro foi encontrado com este título.");
         }
     } catch (error) {
-        console.error("Erro na busca de metadados:", error);
         hideModal();
-        showModal("Erro na Busca", `Não foi possível buscar os dados do livro: ${error.message}`, []);
+        showModal("Erro na Busca", `Não foi possível buscar os dados: ${error.message}`);
     }
 }
 
 function showApiResultsModal() {
     const book = apiSearchResults[currentApiResultIndex];
     if (!book) return;
-
     const volumeInfo = book.volumeInfo;
     const coverUrl = volumeInfo.imageLinks?.thumbnail || 'https://placehold.co/400x600/171717/FFFFFF?text=Sem+Capa';
-    const title = volumeInfo.title || 'Título desconhecido';
-    const authors = volumeInfo.authors ? volumeInfo.authors.join(', ') : 'Autor desconhecido';
-    const pages = volumeInfo.pageCount ? `${volumeInfo.pageCount} páginas` : '';
-    const isbn = volumeInfo.industryIdentifiers?.find(i => i.type === "ISBN_13")?.identifier || '';
-
     const content = `
         <div class="flex flex-col md:flex-row gap-4">
             <img src="${coverUrl}" class="w-24 md:w-1/3 rounded-lg shadow-md mx-auto">
             <div class="flex-grow">
-                <h3 class="font-bold text-lg">${title}</h3>
-                <p class="text-sm text-neutral-400">${authors}</p>
-                <p class="text-xs text-neutral-500 mt-1">${pages} | ISBN: ${isbn}</p>
+                <h3 class="font-bold text-lg">${volumeInfo.title || ''}</h3>
+                <p class="text-sm text-neutral-400">${volumeInfo.authors?.join(', ') || ''}</p>
+                <p class="text-xs text-neutral-500 mt-1">${volumeInfo.pageCount || ''} páginas</p>
                 <p class="text-sm mt-2 line-clamp-3">${volumeInfo.description || ''}</p>
             </div>
         </div>
         <div class="flex justify-between items-center mt-4">
-             <button id="prev-book-btn" class="btn-expressive btn-text !h-10 !p-2">&lt; Anterior</button>
-             <span>${currentApiResultIndex + 1} / ${apiSearchResults.length}</span>
-             <button id="next-book-btn" class="btn-expressive btn-text !h-10 !p-2">Próxima &gt;</button>
+             <button id="prev-book-btn" class="btn-expressive btn-text !h-10 !p-2">&lt; Ant</button>
+             <span>${currentApiResultIndex + 1}/${apiSearchResults.length}</span>
+             <button id="next-book-btn" class="btn-expressive btn-text !h-10 !p-2">Próx &gt;</button>
         </div>
     `;
-
-    const actions = [
-        { id: 'select-book-btn', text: '<span class="material-symbols-outlined !text-base mr-2">done</span>É essa!', class: 'btn-primary', onClick: selectApiBook },
-    ];
-
-    // Re-usa o showModal genérico, mas ele será sobreposto pelo modal do formulário se a busca for de lá.
-    // O ideal seria um sistema de modal mais robusto, mas isso funciona por agora.
+    const actions = [{ id: 'select-book-btn', text: 'É essa!', class: 'btn-primary', onClick: selectApiBook }];
     showModal(`Resultados da Busca`, content, actions);
-
     document.getElementById('prev-book-btn').disabled = currentApiResultIndex === 0;
     document.getElementById('next-book-btn').disabled = currentApiResultIndex === apiSearchResults.length - 1;
     document.getElementById('prev-book-btn').onclick = showPrevApiBook;
     document.getElementById('next-book-btn').onclick = showNextApiBook;
-
 }
 
-function showNextApiBook() {
-    if (currentApiResultIndex < apiSearchResults.length - 1) {
-        currentApiResultIndex++;
-        showApiResultsModal();
-    }
-}
-
-function showPrevApiBook() {
-    if (currentApiResultIndex > 0) {
-        currentApiResultIndex--;
-        showApiResultsModal();
-    }
-}
+function showNextApiBook() { if (currentApiResultIndex < apiSearchResults.length - 1) { currentApiResultIndex++; showApiResultsModal(); } }
+function showPrevApiBook() { if (currentApiResultIndex > 0) { currentApiResultIndex--; showApiResultsModal(); } }
 
 function selectApiBook() {
-    // O container do formulário é o modalContent quando o formulário está aberto
-    const container = document.getElementById('modal-content');
+    const formContainer = document.getElementById('book-form');
+    if (!formContainer) return;
+
     const book = apiSearchResults[currentApiResultIndex].volumeInfo;
 
-    container.querySelector('#title').value = book.title || '';
-    container.querySelector('#author').value = book.authors ? book.authors.join(', ') : '';
-    container.querySelector('#synopsis').value = book.description || '';
-    container.querySelector('#totalPages').value = book.pageCount || '';
-    container.querySelector('#isbn').value = book.industryIdentifiers?.find(i => i.type === "ISBN_13")?.identifier || '';
+    formContainer.querySelector('#title').value = book.title || '';
+    formContainer.querySelector('#author').value = book.authors?.join(', ') || '';
+    formContainer.querySelector('#synopsis').value = book.description || '';
+    formContainer.querySelector('#totalPages').value = book.pageCount || '';
+    formContainer.querySelector('#isbn').value = book.industryIdentifiers?.find(i => i.type === "ISBN_13")?.identifier || '';
+
     const coverUrl = book.imageLinks?.thumbnail || '';
-    container.querySelector('#coverUrl').value = coverUrl;
+    formContainer.querySelector('#coverUrl').value = coverUrl;
 
-    const previewContainer = container.querySelector('#cover-preview-container');
-    if (coverUrl) {
-        previewContainer.innerHTML = `<img src="${coverUrl}" class="w-32 mx-auto rounded-lg shadow-md">`;
-    } else {
-        previewContainer.innerHTML = '';
-    }
+    const previewContainer = formContainer.querySelector('#cover-preview-container');
+    previewContainer.innerHTML = coverUrl ? `<img src="${coverUrl}" class="w-32 mx-auto rounded-lg shadow-md">` : '';
 
-    // Não fecha o modal principal, apenas o de resultados (que na verdade é o mesmo)
-    // O usuário vê a atualização e pode continuar editando o form.
-    renderFormInModal(container.querySelector('#bookId').value);
+    hideModal();
 }
 
-
 function handleCsvExport() {
-    if (allBooks.length === 0) {
-        showModal("Sem dados", "Não há livros para exportar.", []);
-        return;
-    }
-    const goodreadsData = allBooks.map(b => ({
-        'Book Id': b.id,
-        'Title': b.title,
-        'Author': b.author,
-        'ISBN': b.isbn || '',
-        'My Rating': b.rating || 0,
-        'Average Rating': 0,
-        'Publisher': '',
-        'Binding': '',
-        'Number of Pages': b.totalPages !== undefined ? b.totalPages : b.pages || '',
-        'Year Published': '',
-        'Original Publication Year': '',
-        'Date Read': b.endDate ? new Date(b.endDate).toISOString().split('T')[0] : '',
-        'Date Added': b.addedAt ? b.addedAt.toISOString().split('T')[0] : '',
-        'Bookshelves': b.status,
-        'My Review': b.review || '',
-    }));
-
-    const csv = Papa.unparse(goodreadsData);
+    if (allBooks.length === 0) { showModal("Sem dados", "Não há livros para exportar."); return; }
+    const csv = Papa.unparse(allBooks.map(b => ({ 'Book Id': b.id, 'Title': b.title, 'Author': b.author, 'ISBN': b.isbn || '', 'My Rating': b.rating || 0, 'Date Read': b.endDate || '', 'Date Added': b.addedAt?.toISOString().split('T')[0] || '', 'Bookshelves': (b.shelves || []).map(id => userShelves.find(s => s.id === id)?.name).join(', '), 'My Review': b.review || '' })));
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", "minha_estante_export.csv");
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
+    link.href = URL.createObjectURL(blob);
+    link.download = "minha_estante.csv";
     link.click();
-    document.body.removeChild(link);
 }
 
 function handleCsvImport(event) {
-    if (typeof window.Papa === 'undefined') {
-        console.error("CSV Import: ERRO - A biblioteca PapaParse não foi encontrada no objeto 'window'. Verifique se o script está a ser carregado corretamente no 'app.html'.");
-        showModal("Erro de Importação", "A ferramenta para ler arquivos CSV não carregou. Verifique sua conexão com a internet e se há algum bloqueador de scripts ativo.");
-        return;
-    }
     const file = event.target.files[0];
     if (!file) return;
-    showLoading("Importando livros do Goodreads...");
-
-    window.Papa.parse(file, {
+    showLoading("Importando CSV...");
+    Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
         complete: async (results) => {
@@ -1443,77 +1334,25 @@ function handleCsvImport(event) {
                 let status = 'quero-ler';
                 if (shelves === 'read') status = 'lido';
                 if (shelves === 'currently-reading') status = 'lendo';
-
-                const formatDate = (dateStr) => {
-                    if (!dateStr || dateStr.length === 0) return '';
-                    try {
-                        const [year, month, day] = dateStr.split('/');
-                        if (year && month && day && year.length === 4) {
-                            return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-                        }
-                        const d = new Date(dateStr);
-                        if (isNaN(d.getTime())) return '';
-                        return d.toISOString().split('T')[0];
-                    } catch (e) {
-                        return '';
-                    }
-                };
-
-                return {
-                    title: row.Title || '',
-                    author: row.Author || '',
-                    isbn: row.ISBN13 || row.ISBN || '',
-                    totalPages: Number(row['Number of Pages']) || 0,
-                    rating: Number(row['My Rating']) || 0,
-                    startDate: '',
-                    endDate: formatDate(row['Date Read']),
-                    review: row['My Review'] || '',
-                    status: status,
-                    favorite: (row.Bookshelves || '').includes('favorites'),
-                    mediaType: 'fisico',
-                    currentProgress: 0,
-                    addedAt: new Date(formatDate(row['Date Added']) || Date.now())
-                };
+                return { title: row.Title || '', author: row.Author || '', status: status };
             }).filter(b => b.title && b.author);
 
             if (booksToImport.length > 0) {
-                showLoading(`Enriquecendo dados de ${booksToImport.length} livros...`);
                 const batch = writeBatch(db);
                 const collectionRef = collection(db, "users", userId, "books");
-
                 for (const bookData of booksToImport) {
-                    try {
-                        const query = encodeURIComponent(`intitle:${bookData.title}+inauthor:${bookData.author}`);
-                        const url = `https://www.googleapis.com/books/v1/volumes?q=${query}&key=${GOOGLE_BOOKS_API_KEY}&maxResults=1`;
-                        const response = await fetch(url);
-                        const apiData = await response.json();
-                        if (apiData.items && apiData.items.length > 0) {
-                            const bookApi = apiData.items[0].volumeInfo;
-                            bookData.coverUrl = bookApi.imageLinks?.thumbnail || '';
-                            if (!bookData.synopsis) bookData.synopsis = bookApi.description || '';
-                        }
-                    } catch (e) {
-                        console.warn("Não foi possível enriquecer dados para: ", bookData.title, e);
-                    }
-
                     const docRef = doc(collectionRef);
-                    batch.set(docRef, bookData);
+                    batch.set(docRef, { ...bookData, addedAt: new Date() });
                 }
-
                 await batch.commit();
                 hideModal();
-                showModal("Importação Concluída", `${booksToImport.length} livros foram importados e atualizados com sucesso!`, []);
-
+                showModal("Importação Concluída", `${booksToImport.length} livros foram importados!`);
             } else {
                 hideModal();
-                showModal("Nenhum livro válido", "Não foram encontrados livros válidos para importar no arquivo CSV.");
+                showModal("Nenhum livro válido", "Não foram encontrados livros válidos para importar.");
             }
-            event.target.value = null;
         },
-        error: (err) => {
-            hideModal();
-            showModal("Erro no CSV", `Não foi possível processar o arquivo: ${err.message}`);
-        }
+        error: (err) => { hideModal(); showModal("Erro no CSV", `Não foi possível processar o arquivo: ${err.message}`); }
     });
 }
 
