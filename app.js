@@ -966,13 +966,20 @@ function renderSettings() {
     document.getElementById('delete-all-books-btn').onclick = () => { showModal('Confirmar Exclusão Total', 'Tem certeza?', [{ id: 'confirm-delete-all-btn', text: 'Sim, Excluir Tudo', class: 'bg-red-600 text-white', onClick: deleteAllBooks }]); };
 }
 
-async function renderFormInModal(bookId = null) {
+// *** CORREÇÃO INICIADA ***
+// A função renderFormInModal foi modificada para aceitar dados iniciais de um livro,
+// permitindo que a busca da API preencha o formulário diretamente.
+async function renderFormInModal(bookId = null, initialData = null) {
     const modalContainer = document.getElementById('modal-container');
     const modalContent = document.getElementById('modal-content');
     let book = {};
     const isEditing = bookId !== null;
 
-    if (isEditing) {
+    if (initialData) {
+        // Usa os dados fornecidos (da API do Google Books) se existirem
+        book = initialData;
+    } else if (isEditing) {
+        // Se não houver dados iniciais, mas for uma edição, busca o livro na lista
         book = allBooks.find(b => b.id === bookId) || {};
     }
 
@@ -1020,7 +1027,7 @@ async function renderFormInModal(bookId = null) {
                     <div class="card-expressive p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div><label for="synopsis" class="block text-sm font-bold mb-2 text-neutral-300">Sinopse</label><textarea id="synopsis" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.synopsis || ''}</textarea></div>
                         <div><label for="review" class="block text-sm font-bold mb-2 text-neutral-300">Minha Resenha</label><textarea id="review" rows="6" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3">${book.review || ''}</textarea></div>
-                        <div class="md:col-span-2"><label for="categories" class="block text-sm font-bold mb-2 text-neutral-300">Categorias (separadas por vírgula)</label><input type="text" id="categories" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.categories || ''}"></div>
+                        <div class="md:col-span-2"><label for="categories" class="block text-sm font-bold mb-2 text-neutral-300">Categorias (separadas por vírgula)</label><input type="text" id="categories" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${(book.categories || []).join(', ')}"></div>
                     </div>
                     
                     <div class="flex items-center justify-end gap-4 pt-4">
@@ -1042,6 +1049,7 @@ async function renderFormInModal(bookId = null) {
     setupFormListeners(modalContent);
     document.addEventListener('keydown', handleEscKey);
 }
+
 
 function setupFormListeners(container = document) {
     const stars = container.querySelectorAll('.star-icon');
@@ -1089,7 +1097,7 @@ function setupFormListeners(container = document) {
             coverUrl: container.querySelector('#coverUrl').value,
             synopsis: container.querySelector('#synopsis').value,
             review: container.querySelector('#review').value,
-            categories: container.querySelector('#categories').value,
+            categories: container.querySelector('#categories').value ? container.querySelector('#categories').value.split(',').map(c => c.trim()) : [],
             favorite: container.querySelector('#favoriteValue').value === 'true',
             mediaType: container.querySelector('input[name="mediaType"]:checked').value,
             totalPages: Number(container.querySelector('#totalPages').value) || 0,
@@ -1258,28 +1266,36 @@ async function handleMetadataSearch(container = document) {
     }
 }
 
+// *** CORREÇÃO INICIADA ***
+// A função showApiResultsModal foi alterada para fixar o layout do popup de resultados.
+// A capa do livro agora tem tamanho fixo e a área de descrição é rolável.
 function showApiResultsModal() {
     const book = apiSearchResults[currentApiResultIndex];
     if (!book) return;
     const volumeInfo = book.volumeInfo;
-    const coverUrl = volumeInfo.imageLinks?.thumbnail || 'https://placehold.co/400x600/171717/FFFFFF?text=Sem+Capa';
+    const coverUrl = volumeInfo.imageLinks?.thumbnail?.replace('http://', 'https://') || `https://placehold.co/128x194/1a1a1a/ffffff?text=Sem+Capa`;
+
     const content = `
-        <div class="flex flex-col md:flex-row gap-4">
-            <img src="${coverUrl}" class="w-24 md:w-1/3 rounded-lg shadow-md mx-auto">
-            <div class="flex-grow">
-                <h3 class="font-bold text-lg">${volumeInfo.title || ''}</h3>
-                <p class="text-sm text-neutral-400">${volumeInfo.authors?.join(', ') || ''}</p>
-                <p class="text-xs text-neutral-500 mt-1">${volumeInfo.pageCount || ''} páginas</p>
-                <p class="text-sm mt-2 line-clamp-3">${volumeInfo.description || ''}</p>
+        <div class="flex flex-col md:flex-row gap-4 h-[220px]">
+            <img src="${coverUrl}" alt="Capa de ${volumeInfo.title || ''}" class="w-[128px] h-[194px] object-cover rounded-lg shadow-md flex-shrink-0" style="width: 128px; height: 194px;">
+            <div class="flex-grow flex flex-col min-w-0">
+                <h3 class="font-bold text-lg truncate">${volumeInfo.title || 'Título Desconhecido'}</h3>
+                <p class="text-sm text-neutral-400 truncate">${volumeInfo.authors?.join(', ') || 'Autor Desconhecido'}</p>
+                <p class="text-xs text-neutral-500 mt-1">${volumeInfo.pageCount || '?'} páginas</p>
+                <div class="text-sm mt-2 overflow-y-auto h-full pr-2">
+                    <p>${volumeInfo.description || 'Sinopse não disponível.'}</p>
+                </div>
             </div>
         </div>
         <div class="flex justify-between items-center mt-4">
              <button id="prev-book-btn" class="btn-expressive btn-text !h-10 !p-2">&lt; Ant</button>
-             <span>${currentApiResultIndex + 1}/${apiSearchResults.length}</span>
+             <span>${currentApiResultIndex + 1} de ${apiSearchResults.length}</span>
              <button id="next-book-btn" class="btn-expressive btn-text !h-10 !p-2">Próx &gt;</button>
         </div>
     `;
-    const actions = [{ id: 'select-book-btn', text: 'É essa!', class: 'btn-primary', onClick: selectApiBook }];
+    // A ação do botão agora chama a função selectApiBook corrigida e mantém o modal principal aberto.
+    const actions = [{ id: 'select-book-btn', text: 'É esta!', class: 'btn-primary', onClick: selectApiBook, keepOpen: true }];
+
     showModal(`Resultados da Busca`, content, actions);
     document.getElementById('prev-book-btn').disabled = currentApiResultIndex === 0;
     document.getElementById('next-book-btn').disabled = currentApiResultIndex === apiSearchResults.length - 1;
@@ -1290,26 +1306,34 @@ function showApiResultsModal() {
 function showNextApiBook() { if (currentApiResultIndex < apiSearchResults.length - 1) { currentApiResultIndex++; showApiResultsModal(); } }
 function showPrevApiBook() { if (currentApiResultIndex > 0) { currentApiResultIndex--; showApiResultsModal(); } }
 
+
+// *** CORREÇÃO INICIADA ***
+// A função selectApiBook foi reescrita. Agora ela não tenta mais encontrar o formulário (que foi substituído).
+// Em vez disso, ela pega os dados do livro, cria um objeto e chama a função renderFormInModal,
+// passando esses dados para que o formulário seja recriado já preenchido.
 function selectApiBook() {
-    const formContainer = document.getElementById('book-form');
-    if (!formContainer) return;
+    const bookResult = apiSearchResults[currentApiResultIndex].volumeInfo;
 
-    const book = apiSearchResults[currentApiResultIndex].volumeInfo;
+    const bookData = {
+        title: bookResult.title || '',
+        author: bookResult.authors?.join(', ') || '',
+        synopsis: bookResult.description || '',
+        totalPages: bookResult.pageCount || '',
+        isbn: bookResult.industryIdentifiers?.find(i => i.type === "ISBN_13")?.identifier || bookResult.industryIdentifiers?.find(i => i.type === "ISBN_10")?.identifier || '',
+        coverUrl: bookResult.imageLinks?.thumbnail?.replace('http://', 'https://') || '',
+        categories: bookResult.categories || [],
+        id: null,
+        status: 'quero-ler',
+        rating: 0,
+        favorite: false,
+        feelings: [],
+        shelves: [],
+    };
 
-    formContainer.querySelector('#title').value = book.title || '';
-    formContainer.querySelector('#author').value = book.authors?.join(', ') || '';
-    formContainer.querySelector('#synopsis').value = book.description || '';
-    formContainer.querySelector('#totalPages').value = book.pageCount || '';
-    formContainer.querySelector('#isbn').value = book.industryIdentifiers?.find(i => i.type === "ISBN_13")?.identifier || '';
-
-    const coverUrl = book.imageLinks?.thumbnail || '';
-    formContainer.querySelector('#coverUrl').value = coverUrl;
-
-    const previewContainer = formContainer.querySelector('#cover-preview-container');
-    previewContainer.innerHTML = coverUrl ? `<img src="${coverUrl}" class="w-32 mx-auto rounded-lg shadow-md">` : '';
-
-    hideModal();
+    // Recarrega o modal do formulário, passando os dados do livro encontrado
+    renderFormInModal(null, bookData);
 }
+
 
 function handleCsvExport() {
     if (allBooks.length === 0) { showModal("Sem dados", "Não há livros para exportar."); return; }
