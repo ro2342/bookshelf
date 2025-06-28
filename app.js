@@ -30,6 +30,11 @@ let apiSearchResults = [];
 let currentApiResultIndex = 0;
 let shelfSearchTerm = '';
 
+// Array de sentimentos para a nova funcionalidade
+const sentimentos = [
+    'curiosidade', 'inspiração', 'reflexão', 'relaxamento', 'comoção', 'surpresa', 'paixão', 'diversão', 'alegria', 'surto', 'ansiedade', 'aflição', 'distração', 'confusão', 'raiva', 'medo', 'vulnerabilidade', 'vergonha', 'frustração', 'tristeza', 'cansaço', 'tédio', 'conexão', 'foco', 'intensidade', 'excitação', 'choque', 'horror', 'nojo', 'indiferença'
+];
+
 
 // --- SISTEMA DE TEMAS ---
 const themes = {
@@ -51,22 +56,30 @@ const themes = {
 };
 const themeOrder = ['dark', 'sunset', 'forest', 'nonbinary_pride', 'taylor_swift', 'fearless', 'speak_now', 'red', '1989', 'reputation', 'lover', 'folklore', 'evermore', 'midnights', 'ttpd'];
 
-function applyTheme(themeName) {
+function applyTheme(themeName, saveToDb = true) {
     const theme = themes[themeName];
     if (!theme) return;
+
     for (const [key, value] of Object.entries(theme.values)) {
         const prop = `--md-sys-color-${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
         document.documentElement.style.setProperty(prop, value);
     }
+
     localStorage.setItem('bookTrackerTheme', themeName);
+
+    if (saveToDb && userId) {
+        saveProfile({ theme: themeName }, false); // Salva o tema no perfil do usuário silenciosamente
+    }
 }
 
 function initTheme() {
     const savedTheme = localStorage.getItem('bookTrackerTheme');
+    // Aplica o tema do localStorage inicialmente para uma pintura rápida.
+    // O tema do Firebase será aplicado depois, se existir, através do listenToProfile.
     if (savedTheme && themes[savedTheme]) {
-        applyTheme(savedTheme);
+        applyTheme(savedTheme, false);
     } else {
-        applyTheme('dark');
+        applyTheme('dark', false);
     }
 }
 
@@ -225,7 +238,12 @@ function listenToProfile() {
             }
         }
 
-        router();
+        // Aplica o tema do perfil do Firebase, se existir
+        if (userProfile.theme) {
+            applyTheme(userProfile.theme, false); // false para não salvar de volta no DB
+        }
+
+        router(); // Re-renderiza a página ativa para refletir quaisquer mudanças
     }, (error) => {
         console.error("Erro ao ouvir perfil:", error);
     });
@@ -269,15 +287,20 @@ async function saveBook(bookData) {
     return await saveData(collectionName, dataToSave, docId);
 }
 
-async function saveProfile(profileData) {
+async function saveProfile(profileData, showModals = true) {
+    if (!userId) return; // Não mostra modal se o usuário não estiver logado
+
     const profileDocRef = doc(db, "users", userId, "profile", "data");
-    showLoading("Salvando perfil...");
+    if (showModals) showLoading("Salvando perfil...");
+
     try {
         await setDoc(profileDocRef, profileData, { merge: true });
-        hideModal();
-        showModal("Sucesso!", "Seu perfil foi atualizado.", []);
+        if (showModals) {
+            hideModal();
+            showModal("Sucesso!", "Seu perfil foi atualizado.", []);
+        }
     } catch (error) {
-        hideModal();
+        if (showModals) hideModal();
         showModal("Erro", `Não foi possível salvar seu perfil: ${error.message}`);
         console.error("Erro ao salvar perfil:", error);
     }
@@ -389,18 +412,6 @@ function updateNavLinks(activeHash) {
     });
 }
 
-function normalizeText(text) {
-    if (!text) return '';
-    return text
-        .toString()
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "")
-        .replace(/\s+/g, ' ');
-}
-
-
 function renderEstante() {
     const page = document.getElementById('page-estante');
     const displayName = userProfile.name || 'Leitor(a)';
@@ -432,11 +443,6 @@ function renderEstante() {
                  <h1 class="font-display text-5xl md:text-6xl">Minha estante</h1>
                  <p class="text-neutral-400 mt-2">Tudo o que você leu, vai ler, quer ler. Ou abandonou. Sem julgamentos.</p>
             </div>
-            
-            <div class="relative">
-                 <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">search</span>
-                 <input type="search" id="shelf-search-input" placeholder="Buscar na sua estante por título ou autor..." class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 pl-12 focus:border-[hsl(var(--md-sys-color-primary))] focus:ring-0">
-            </div>
 
             <div class="segmented-btn-container flex-wrap flex gap-2">
                 ${Object.keys(statusMap).map(key => `
@@ -462,41 +468,21 @@ function renderEstante() {
             e.currentTarget.classList.add('active');
         };
     });
-
-    const searchInput = document.getElementById('shelf-search-input');
-    searchInput.oninput = (e) => {
-        shelfSearchTerm = e.target.value;
-        currentPage = 1;
-        renderShelfContent();
-    };
 }
 
 function renderShelfContent() {
     const contentContainer = document.getElementById('shelf-content');
     if (!contentContainer) return;
 
-    let booksToDisplay = allBooks;
+    const filteredBooks = allBooks.filter(book => {
+        if (currentFilter === 'todos') return true;
+        if (currentFilter === 'favorito') return book.favorite;
+        if (currentFilter === 'comCapa') return !!book.coverUrl;
+        if (currentFilter === 'semCapa') return !book.coverUrl;
+        return book.status === currentFilter;
+    });
 
-    // Aplicar filtro de status
-    if (currentFilter !== 'todos') {
-        booksToDisplay = booksToDisplay.filter(book => {
-            if (currentFilter === 'favorito') return book.favorite;
-            if (currentFilter === 'comCapa') return !!book.coverUrl;
-            if (currentFilter === 'semCapa') return !book.coverUrl;
-            return book.status === currentFilter;
-        });
-    }
-
-    // Aplicar filtro de busca
-    if (shelfSearchTerm) {
-        const normalizedSearch = normalizeText(shelfSearchTerm);
-        booksToDisplay = booksToDisplay.filter(book =>
-            normalizeText(book.title).includes(normalizedSearch) ||
-            (book.author && normalizeText(book.author).includes(normalizedSearch))
-        );
-    }
-
-    const totalItems = booksToDisplay.length;
+    const totalItems = filteredBooks.length;
     const totalPages = itemsPerPage > 0 ? Math.ceil(totalItems / itemsPerPage) : 1;
     if (currentPage > totalPages && totalPages > 0) {
         currentPage = totalPages;
@@ -504,7 +490,7 @@ function renderShelfContent() {
 
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = itemsPerPage > 0 ? startIndex + itemsPerPage : totalItems;
-    const paginatedBooks = booksToDisplay.slice(startIndex, endIndex);
+    const paginatedBooks = filteredBooks.slice(startIndex, endIndex);
 
     if (paginatedBooks.length > 0) {
         contentContainer.innerHTML = paginatedBooks.map(bookCard).join('');
@@ -541,6 +527,12 @@ function bookCard(book) {
         `<span class="material-symbols-outlined !text-xl ${i < book.rating ? 'filled text-amber-400' : 'text-neutral-600'}">star</span>`
     ).join('');
 
+    const feelingsHtml = book.feelings && book.feelings.length > 0
+        ? `<div class="flex flex-wrap gap-1 mt-2 justify-center sm:justify-start">
+            ${book.feelings.slice(0, 5).map(f => `<span class="mood-tag-pill text-xs font-bold px-2 py-0.5 rounded-full capitalize">${f}</span>`).join('')}
+           </div>`
+        : '';
+
     return `
         <div data-href="#/book/${book.id}" class="book-card-link card-expressive p-4 flex flex-col sm:flex-row gap-4 cursor-pointer hover:bg-[hsl(var(--md-sys-color-surface-container-highest))]">
             <div class="w-1/3 sm:w-1/5 flex-shrink-0 mx-auto">
@@ -549,8 +541,9 @@ function bookCard(book) {
             <div class="flex flex-col flex-grow text-center sm:text-left">
                 <h2 class="font-display text-xl lg:text-2xl title-text-shadow font-bold leading-tight">${book.title}</h2>
                 <p class="text-sm text-neutral-400 mb-2">${book.author || 'Autor desconhecido'}</p>
-                <div class="flex items-center justify-center sm:justify-start gap-1 mb-4">${ratingHtml}</div>
-                <div class="mt-auto flex flex-col sm:flex-row gap-2">
+                <div class="flex items-center justify-center sm:justify-start gap-1 mb-2">${ratingHtml}</div>
+                ${feelingsHtml}
+                <div class="mt-auto pt-2 flex flex-col sm:flex-row gap-2">
                      <a href="#/edit/${book.id}" class="btn-expressive btn-primary !h-10 !text-sm flex-1 flex items-center justify-center gap-2">
                         <span class="material-symbols-outlined !text-base">edit</span>Editar
                     </a>
@@ -757,7 +750,7 @@ function renderProfile() {
 
 function renderSettings() {
     const page = document.getElementById('page-settings');
-    const savedTheme = localStorage.getItem('bookTrackerTheme') || 'dark';
+    const savedTheme = userProfile.theme || localStorage.getItem('bookTrackerTheme') || 'dark';
 
     page.innerHTML = `
          <div class="max-w-2xl mx-auto space-y-8">
@@ -804,6 +797,7 @@ function renderSettings() {
     document.getElementById('logout-btn').onclick = () => {
         signOut(auth).then(() => {
             localStorage.removeItem('bookTrackerUserId');
+            localStorage.removeItem('bookTrackerTheme'); // Limpa também o tema local ao sair
             window.location.href = 'index.html';
         }).catch((error) => {
             console.error('Erro ao fazer logout: ', error);
@@ -843,6 +837,8 @@ async function renderForm(bookId = null) {
         book = allBooks.find(b => b.id === bookId) || {};
     }
 
+    const selectedFeelings = book.feelings || [];
+
     page.innerHTML = `
         <div class="max-w-2xl mx-auto">
             <h1 class="font-display text-5xl md:text-6xl mb-12">${isEditing ? 'Editar Livro' : 'Adicionar Novo Livro'}</h1>
@@ -874,6 +870,19 @@ async function renderForm(bookId = null) {
                         <label for="coverUrl" class="block text-sm font-bold mb-2 text-neutral-300">URL da Capa</label>
                         <input type="url" id="coverUrl" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" value="${book.coverUrl || ''}">
                     </div>
+                </div>
+
+                <div class="card-expressive p-6">
+                    <h3 class="text-xl font-bold mb-4 text-[hsl(var(--md-sys-color-primary))]">Como este livro te fez sentir?</h3>
+                    <p class="text-neutral-400 mb-4 text-sm">Selecione até 5 sentimentos.</p>
+                    <div id="feelings-container" class="flex flex-wrap gap-2">
+                        ${sentimentos.map(s => `
+                            <button type="button" data-feeling="${s}" class="mood-tag-btn btn-expressive !py-1 !px-3 !h-auto !text-xs capitalize ${selectedFeelings.includes(s) ? 'selected' : ''}">
+                                ${s}
+                            </button>
+                        `).join('')}
+                    </div>
+                    <input type="hidden" id="feelingsValue" value="${selectedFeelings.join(',') || ''}">
                 </div>
 
                 <div class="card-expressive p-6">
@@ -967,6 +976,7 @@ async function renderForm(bookId = null) {
 }
 
 function setupFormListeners() {
+    // Rating stars logic
     const stars = document.querySelectorAll('.star-icon');
     stars.forEach(star => {
         star.onclick = () => {
@@ -980,6 +990,7 @@ function setupFormListeners() {
         };
     });
 
+    // Favorite button logic
     const favBtn = document.getElementById('favorite-btn');
     const favValueInput = document.getElementById('favoriteValue');
     favBtn.onclick = () => {
@@ -989,6 +1000,7 @@ function setupFormListeners() {
         favBtn.querySelector('span').classList.toggle('text-red-500', !isFavorite);
     };
 
+    // Media type toggle logic
     const mediaTypeRadios = document.querySelectorAll('input[name="mediaType"]');
     const pagesContainer = document.getElementById('total-pages-container');
     const timeContainer = document.getElementById('total-time-container');
@@ -1008,6 +1020,37 @@ function setupFormListeners() {
     mediaTypeRadios.forEach(radio => radio.onchange = toggleMediaFields);
     toggleMediaFields();
 
+    // Feelings/Moods selection logic
+    const feelingsContainer = document.getElementById('feelings-container');
+    const feelingsValueInput = document.getElementById('feelingsValue');
+    if (feelingsContainer) {
+        feelingsContainer.addEventListener('click', (e) => {
+            if (e.target.matches('.mood-tag-btn')) {
+                e.preventDefault();
+                const btn = e.target;
+                const feeling = btn.dataset.feeling;
+                let selectedFeelings = feelingsValueInput.value ? feelingsValueInput.value.split(',').filter(f => f) : [];
+
+                if (selectedFeelings.includes(feeling)) {
+                    selectedFeelings = selectedFeelings.filter(f => f !== feeling);
+                    btn.classList.remove('selected');
+                } else {
+                    if (selectedFeelings.length < 5) {
+                        selectedFeelings.push(feeling);
+                        btn.classList.add('selected');
+                    } else {
+                        // Optional: Show a message that the limit is 5
+                        console.warn("Limit of 5 feelings reached.");
+                        alert("Você pode selecionar no máximo 5 sentimentos.");
+                    }
+                }
+                feelingsValueInput.value = selectedFeelings.join(',');
+            }
+        });
+    }
+
+
+    // Form submission logic
     document.getElementById('book-form').onsubmit = async (e) => {
         e.preventDefault();
         const bookId = document.getElementById('bookId').value || null;
@@ -1029,6 +1072,7 @@ function setupFormListeners() {
             mediaType: document.querySelector('input[name="mediaType"]:checked').value,
             totalPages: Number(document.getElementById('totalPages').value) || 0,
             totalTime: document.getElementById('totalTime').value || '',
+            feelings: document.getElementById('feelingsValue').value ? document.getElementById('feelingsValue').value.split(',').filter(f => f) : [],
         };
 
         showLoading("Salvando...");
@@ -1078,6 +1122,15 @@ async function renderDetails(bookId) {
         totalDisplay = `${book.totalTime || '?'} de áudio`;
     }
 
+    const feelingsHtml = book.feelings && book.feelings.length > 0
+        ? `<div class="card-expressive p-6">
+               <h3 class="text-xl font-bold mb-4">Como este livro me fez sentir</h3>
+               <div class="flex flex-wrap gap-2">
+                   ${book.feelings.map(f => `<span class="mood-tag-pill text-sm font-bold px-3 py-1 rounded-full capitalize">${f}</span>`).join('')}
+               </div>
+           </div>`
+        : '';
+
     page.innerHTML = `
         <div class="max-w-4xl mx-auto">
             <a href="#/estante" class="btn-expressive btn-text mb-6">
@@ -1111,6 +1164,7 @@ async function renderDetails(bookId) {
             <div class="space-y-8">
                  ${book.synopsis ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Sinopse</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.synopsis}</p></div>` : ''}
                  ${book.review ? `<div class="card-expressive p-6"><h3 class="text-xl font-bold mb-4">Minha Resenha</h3><p class="text-neutral-300 whitespace-pre-wrap">${book.review}</p></div>` : ''}
+                 ${feelingsHtml}
             </div>
         </div>
     `;
