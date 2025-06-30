@@ -1490,6 +1490,7 @@ async function renderDetailsInModal(bookId) {
                          <div class="mt-auto flex flex-col sm:flex-row gap-4">
                             <a href="#/edit/${book.id}" class="btn-expressive btn-primary flex-1"><span class="material-symbols-outlined mr-2">edit</span>Editar</a>
                             <button id="quick-add-to-shelf-btn" class="btn-expressive btn-tonal"><span class="material-symbols-outlined mr-2">add_circle</span>Adic. à Estante</button>
+                            <button id="share-book-btn" class="btn-expressive btn-tonal"><span class="material-symbols-outlined mr-2">share</span>Partilhar</button>
                             <button id="delete-book-btn" class="btn-expressive bg-red-900/60 text-red-300 hover:bg-red-800"><span class="material-symbols-outlined">delete</span></button>
                         </div>
                     </div>
@@ -1514,6 +1515,9 @@ async function renderDetailsInModal(bookId) {
     modalContent.firstElementChild.onclick = (e) => e.stopPropagation();
     modalContent.querySelector('#delete-book-btn').onclick = () => showModal('Confirmar Exclusão', `Tem a certeza que deseja excluir o livro "<strong>${book.title}</strong>"?`, [{ id: 'confirm-delete-btn', text: 'Sim, Excluir', class: 'bg-red-600 text-white', onClick: () => deleteBook(book.id) }]);
     modalContent.querySelector('#quick-add-to-shelf-btn').onclick = () => showQuickShelfManager(book);
+    // ADICIONADO: Event listener para o novo botão de partilha
+    modalContent.querySelector('#share-book-btn').onclick = () => handleShareBook(book);
+
 
     if (book.status === 'lendo') {
         modalContent.querySelector('#update-progress-btn').onclick = () => {
@@ -1522,6 +1526,27 @@ async function renderDetailsInModal(bookId) {
         }
     }
     document.addEventListener('keydown', handleEscKey);
+}
+
+// ADICIONADO: Função para lidar com a partilha do livro
+function handleShareBook(book) {
+    const vercelApiUrl = 'https://bookshelf-lyart-six.vercel.app/api/gerar-imagem';
+
+    const params = new URLSearchParams();
+    params.append('title', book.title || 'Sem Título');
+    params.append('author', book.author || 'Autor Desconhecido');
+    if (book.coverUrl) {
+        params.append('coverUrl', getCoverUrl(book, 400, 600));
+    }
+    if (userProfile.avatarUrl) {
+        params.append('avatarUrl', userProfile.avatarUrl);
+    }
+    if (userProfile.name) {
+        params.append('userName', userProfile.name);
+    }
+
+    const imageUrl = `${vercelApiUrl}?${params.toString()}`;
+    window.open(imageUrl, '_blank');
 }
 
 function showQuickShelfManager(book) {
