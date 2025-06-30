@@ -1,22 +1,27 @@
 import { ImageResponse } from '@vercel/og';
 
-export const config = {
-    runtime: 'edge',
-};
+// REMOVIDO: A configuração de runtime para usar o ambiente padrão da Vercel
+// export const config = {
+//     runtime: 'edge',
+// };
 
 // Função para buscar a fonte Manrope do Google Fonts
 async function getManropeFont() {
-    const response = await fetch('https://fonts.googleapis.com/css2?family=Manrope:wght@400;700&display=swap');
+    // Esta implementação é um pouco frágil e pode quebrar se o Google mudar as URLs.
+    // Uma abordagem mais robusta seria incluir os arquivos .ttf na sua pasta do projeto.
+    const response = await fetch('https://fonts.googleapis.com/css2?family=Manrope:wght@400;700&display=swap', {
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
+        }
+    });
     const css = await response.text();
     const fontUrlRegex = /src: url\((.+?)\)/g;
-    const fontUrls = [];
-    let match;
-    while ((match = fontUrlRegex.exec(css)) !== null) {
-        fontUrls.push(match[1]);
-    }
 
-    const font400url = fontUrls.find(url => url.includes('Manrope-Regular')); // Ajuste se necessário
-    const font700url = fontUrls.find(url => url.includes('Manrope-Bold')); // Ajuste se necessário
+    // Extrai todas as URLs de fontes do CSS
+    const fontUrls = css.match(fontUrlRegex).map(url => url.replace(/src: url\(|\)/g, ''));
+
+    const font400url = fontUrls[0]; // Assume que o primeiro é o regular
+    const font700url = fontUrls[1]; // Assume que o segundo é o bold
 
     const [font400, font700] = await Promise.all([
         fetch(font400url).then(res => res.arrayBuffer()),
@@ -32,7 +37,7 @@ async function getManropeFont() {
 
 export default async function handler(request) {
     try {
-        const { searchParams } = new URL(request.url);
+        const { searchParams } = new URL(request.url, 'http://localhost');
 
         // Parâmetros da URL com valores padrão para segurança
         const title = searchParams.has('title') ? searchParams.get('title').slice(0, 100) : 'Título do Livro';
@@ -86,7 +91,7 @@ export default async function handler(request) {
             },
         );
     } catch (e) {
-        console.error(e);
+        console.error("Erro na API de imagem:", e.message);
         return new Response('Falha ao gerar a imagem.', { status: 500 });
     }
 }
