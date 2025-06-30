@@ -1,38 +1,42 @@
 import { ImageResponse } from '@vercel/og';
 
-// Função para buscar a fonte Manrope do Google Fonts
-async function getManropeFont() {
-    // Esta implementação é um pouco frágil e pode quebrar se o Google mudar as URLs.
-    // Uma abordagem mais robusta seria incluir os arquivos .ttf na sua pasta do projeto.
-    const response = await fetch('https://fonts.googleapis.com/css2?family=Manrope:wght@400;700&display=swap', {
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36',
-        }
-    });
-    const css = await response.text();
-    const fontUrlRegex = /src: url\((.+?)\)/g;
+// Esta função agora carrega as fontes da pasta /public do seu projeto.
+async function getLocalFonts(request) {
+    const host = request.headers.get('host');
+    const protocol = request.headers.get('x-forwarded-proto') || 'https';
+    const baseUrl = `${protocol}://${host}`;
 
-    // Extrai todas as URLs de fontes do CSS
-    const fontUrls = css.match(fontUrlRegex).map(url => url.replace(/src: url\(|\)/g, ''));
+    const fontRegularUrl = `${baseUrl}/fonts/Manrope-Regular.ttf`;
+    const fontBoldUrl = `${baseUrl}/fonts/Manrope-Bold.ttf`;
 
-    const font400url = fontUrls[0]; // Assume que o primeiro é o regular
-    const font700url = fontUrls[1]; // Assume que o segundo é o bold
+    try {
+        const [font400, font700] = await Promise.all([
+            fetch(fontRegularUrl).then(res => {
+                if (!res.ok) throw new Error(`Failed to fetch regular font: ${res.statusText}`);
+                return res.arrayBuffer();
+            }),
+            fetch(fontBoldUrl).then(res => {
+                if (!res.ok) throw new Error(`Failed to fetch bold font: ${res.statusText}`);
+                return res.arrayBuffer();
+            })
+        ]);
 
-    const [font400, font700] = await Promise.all([
-        fetch(font400url).then(res => res.arrayBuffer()),
-        fetch(font700url).then(res => res.arrayBuffer())
-    ]);
-
-    return [
-        { name: 'Manrope', data: font400, weight: 400, style: 'normal' },
-        { name: 'Manrope', data: font700, weight: 700, style: 'normal' },
-    ];
+        return [
+            { name: 'Manrope', data: font400, weight: 400, style: 'normal' },
+            { name: 'Manrope', data: font700, weight: 700, style: 'normal' },
+        ];
+    } catch (error) {
+        console.error("Font loading error:", error.message);
+        // Retorna null ou um array vazio para que a geração de imagem possa prosseguir sem fontes customizadas
+        return [];
+    }
 }
 
 
 export default async function handler(request) {
     try {
-        const { searchParams } = new URL(request.url, 'http://localhost');
+        // Corrigido: A URL base é agora construída corretamente no servidor.
+        const { searchParams } = new URL(request.url, `http://${request.headers.get('host')}`);
 
         // Parâmetros da URL com valores padrão para segurança
         const title = searchParams.has('title') ? searchParams.get('title').slice(0, 100) : 'Título do Livro';
@@ -41,8 +45,8 @@ export default async function handler(request) {
         const avatarUrl = searchParams.get('avatarUrl');
         const userName = searchParams.has('userName') ? `Lido por ${searchParams.get('userName').slice(0, 30)}` : 'Compartilhado por um leitor';
 
-        // Carrega as fontes
-        const manropeFonts = await getManropeFont();
+        // Carrega as fontes locais
+        const manropeFonts = await getLocalFonts(request);
 
         return new ImageResponse(
             (
@@ -57,7 +61,7 @@ export default async function handler(request) {
                         backgroundColor: '#1F2428', // Cor de fundo do app
                         color: '#E1E3E6',
                         padding: '60px',
-                        fontFamily: '"Manrope"',
+                        fontFamily: manropeFonts.length > 0 ? '"Manrope"' : 'sans-serif', // Usa a fonte apenas se ela foi carregada
                     }}
                 >
                     {/* Cabeçalho com Avatar e Nome */}
