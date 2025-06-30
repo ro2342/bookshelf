@@ -1,24 +1,19 @@
 import { ImageResponse } from '@vercel/og';
+import path from 'path';
+import fs from 'fs/promises';
 
-// Esta função agora carrega as fontes da pasta /public do seu projeto.
-async function getLocalFonts(request) {
-    const host = request.headers.get('host');
-    const protocol = request.headers.get('x-forwarded-proto') || 'https';
-    const baseUrl = `${protocol}://${host}`;
-
-    const fontRegularUrl = `${baseUrl}/fonts/Manrope-Regular.ttf`;
-    const fontBoldUrl = `${baseUrl}/fonts/Manrope-Bold.ttf`;
+// Esta função agora carrega as fontes diretamente do sistema de ficheiros do servidor.
+// É a abordagem mais robusta e deve resolver o erro 404.
+async function getLocalFonts() {
+    // O Vercel executa o código a partir da raiz do projeto.
+    // Este caminho aponta para a pasta /public/fonts a partir da raiz.
+    const fontRegularPath = path.join(process.cwd(), 'public', 'fonts', 'Manrope-Regular.ttf');
+    const fontBoldPath = path.join(process.cwd(), 'public', 'fonts', 'Manrope-Bold.ttf');
 
     try {
         const [font400, font700] = await Promise.all([
-            fetch(fontRegularUrl).then(res => {
-                if (!res.ok) throw new Error(`Failed to fetch regular font: ${res.statusText}`);
-                return res.arrayBuffer();
-            }),
-            fetch(fontBoldUrl).then(res => {
-                if (!res.ok) throw new Error(`Failed to fetch bold font: ${res.statusText}`);
-                return res.arrayBuffer();
-            })
+            fs.readFile(fontRegularPath),
+            fs.readFile(fontBoldPath)
         ]);
 
         return [
@@ -26,8 +21,8 @@ async function getLocalFonts(request) {
             { name: 'Manrope', data: font700, weight: 700, style: 'normal' },
         ];
     } catch (error) {
-        console.error("Font loading error:", error.message);
-        // Retorna null ou um array vazio para que a geração de imagem possa prosseguir sem fontes customizadas
+        console.error("Font loading error from filesystem:", error.message);
+        // Retorna um array vazio para que a geração de imagem possa prosseguir sem fontes customizadas.
         return [];
     }
 }
@@ -35,18 +30,17 @@ async function getLocalFonts(request) {
 
 export default async function handler(request) {
     try {
-        // Corrigido: A URL base é agora construída corretamente no servidor.
         const { searchParams } = new URL(request.url, `http://${request.headers.get('host')}`);
 
         // Parâmetros da URL com valores padrão para segurança
-        const title = searchParams.has('title') ? searchParams.get('title').slice(0, 100) : 'Título do Livro';
-        const author = searchParams.has('author') ? searchParams.get('author').slice(0, 80) : 'Autor Desconhecido';
+        const title = searchParams.get('title')?.slice(0, 100) || 'Título do Livro';
+        const author = searchParams.get('author')?.slice(0, 80) || 'Autor Desconhecido';
         const coverUrl = searchParams.get('coverUrl');
         const avatarUrl = searchParams.get('avatarUrl');
-        const userName = searchParams.has('userName') ? `Lido por ${searchParams.get('userName').slice(0, 30)}` : 'Compartilhado por um leitor';
+        const userName = searchParams.get('userName') ? `Lido por ${searchParams.get('userName').slice(0, 30)}` : 'Compartilhado por um leitor';
 
         // Carrega as fontes locais
-        const manropeFonts = await getLocalFonts(request);
+        const manropeFonts = await getLocalFonts();
 
         return new ImageResponse(
             (
