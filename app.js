@@ -700,8 +700,7 @@ function renderEstantes() {
 
             <hr class="border-neutral-800 my-12">
 
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <p class="text-neutral-400">Arraste para reordenar as suas estantes personalizadas.</p>
+            <div class="flex flex-col sm:flex-row justify-end items-start sm:items-center gap-4">
                 <button id="create-shelf-btn" class="btn-expressive btn-primary">
                     <span class="material-symbols-outlined mr-2">add</span> Criar Estante
                 </button>
@@ -729,7 +728,7 @@ function renderEstantes() {
         updateShelfPaginationView(shelf.dataset.shelfId, shelfPaginationState[shelf.dataset.shelfId] || 1);
     });
 
-    initSortable();
+    // initSortable(); // REMOVIDO: Chamada para a função de arrastar
     attachShelfEventListeners();
 }
 
@@ -813,13 +812,14 @@ function shelfSection(shelf, isCustom = false) {
         </div>`;
 }
 
+/*
+// REMOVIDO: Função de arrastar e soltar (Drag and Drop)
 function initSortable() {
     const customShelvesList = document.getElementById('custom-shelves-list');
     if (customShelvesList) {
         new Sortable(customShelvesList, {
             animation: 150,
             handle: '.shelf-container',
-            // **CORREÇÃO**: Adicionadas opções de scroll automático
             scroll: true,
             scrollSensitivity: 100,
             scrollSpeed: 15,
@@ -835,7 +835,6 @@ function initSortable() {
             animation: 150,
             group: 'shared-books',
             handle: '.book-item',
-            // **CORREÇÃO**: Adicionadas opções de scroll automático
             scroll: true,
             scrollSensitivity: 100,
             scrollSpeed: 15,
@@ -844,7 +843,6 @@ function initSortable() {
                 const toShelfId = evt.to.dataset.shelfId;
                 const fromShelfId = evt.from.dataset.shelfId;
 
-                // **CORREÇÃO**: Mantém o estado da página após o 'drop'
                 const oldPage = shelfPaginationState[fromShelfId] || 1;
                 const newPage = shelfPaginationState[toShelfId] || 1;
 
@@ -866,7 +864,7 @@ function initSortable() {
                     ];
 
                     await saveBookOrder(toShelfId, finalOrder);
-                    shelfPaginationState[toShelfId] = oldPage; // Mantém a página
+                    shelfPaginationState[toShelfId] = oldPage; 
                 } else {
                     evt.from.insertBefore(evt.item, evt.from.children[evt.oldIndex]);
 
@@ -911,6 +909,7 @@ function initSortable() {
         });
     });
 }
+*/
 
 function updateShelfPaginationView(shelfId, page) {
     const shelfContainer = document.querySelector(`.shelf-container[data-shelf-id="${shelfId}"]`);
@@ -979,9 +978,6 @@ function attachShelfEventListeners() {
         }
     });
 }
-
-// O resto das funções (showAddBookToShelfModal, renderMeusLivros, etc.) permanecem as mesmas
-// e são incluídas abaixo para garantir que o ficheiro esteja completo.
 
 function showAddBookToShelfModal(shelfId) {
     const shelf = userShelves.find(s => s.id === shelfId);

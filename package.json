@@ -9,4 +9,11 @@
   "devDependencies": {
     "vite": "^7.0.0"
   }
+
+  {
+  "dependencies": {
+    "@vercel/og": "^0.6.2"
+  }
+}
+
 }
