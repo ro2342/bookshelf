@@ -1,10 +1,5 @@
 import { ImageResponse } from '@vercel/og';
 
-// REMOVIDO: A configuração de runtime para usar o ambiente padrão da Vercel
-// export const config = {
-//     runtime: 'edge',
-// };
-
 // Função para buscar a fonte Manrope do Google Fonts
 async function getManropeFont() {
     // Esta implementação é um pouco frágil e pode quebrar se o Google mudar as URLs.
