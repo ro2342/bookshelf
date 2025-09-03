@@ -550,7 +550,7 @@ function getCoverUrl(book, width = 200, height = 300) {
 
 
 // --- Funções do Router e Renderização ---
-const pages = ['estantes', 'meus-livros', 'estatisticas', 'profile', 'settings'];
+const pages = ['estantes', 'meus-livros', 'estatisticas', 'ferramentas', 'profile', 'settings'];
 function hideAllPages() {
     pages.forEach(pageId => {
         const pageEl = document.getElementById(`page-${pageId}`);
@@ -603,6 +603,7 @@ function router() {
             case 'estantes': renderEstantes(); break;
             case 'meus-livros': renderMeusLivros(); break;
             case 'estatisticas': renderEstatisticas(); break;
+            case 'ferramentas': renderFerramentas(); break;
             case 'profile': renderProfile(); break;
             case 'settings': renderSettings(); break;
             default:
@@ -618,7 +619,7 @@ function router() {
 function updateNavLinks(activeHash) {
     document.querySelectorAll('.nav-link').forEach(link => {
         const linkHash = new URL(link.href).hash;
-        if (linkHash === activeHash) {
+        if (linkHash === activeHash || activeHash.startsWith(linkHash + '/')) {
             link.classList.add('text-white', 'bg-neutral-700/50');
             link.classList.remove('text-neutral-400');
         } else {
@@ -811,105 +812,6 @@ function shelfSection(shelf, isCustom = false) {
             </div>
         </div>`;
 }
-
-/*
-// REMOVIDO: Função de arrastar e soltar (Drag and Drop)
-function initSortable() {
-    const customShelvesList = document.getElementById('custom-shelves-list');
-    if (customShelvesList) {
-        new Sortable(customShelvesList, {
-            animation: 150,
-            handle: '.shelf-container',
-            scroll: true,
-            scrollSensitivity: 100,
-            scrollSpeed: 15,
-            onEnd: (evt) => {
-                const orderedIds = Array.from(evt.to.children).map(el => el.dataset.shelfId);
-                saveShelvesOrder(orderedIds);
-            }
-        });
-    }
-
-    document.querySelectorAll('.book-list').forEach(list => {
-        new Sortable(list, {
-            animation: 150,
-            group: 'shared-books',
-            handle: '.book-item',
-            scroll: true,
-            scrollSensitivity: 100,
-            scrollSpeed: 15,
-            onEnd: async (evt) => {
-                const bookId = evt.item.dataset.bookId;
-                const toShelfId = evt.to.dataset.shelfId;
-                const fromShelfId = evt.from.dataset.shelfId;
-
-                const oldPage = shelfPaginationState[fromShelfId] || 1;
-                const newPage = shelfPaginationState[toShelfId] || 1;
-
-                if (fromShelfId === toShelfId) {
-                    const allBookIdsInShelf = getBooksForShelf(toShelfId).map(b => b.id);
-                    const newOrderedIds = Array.from(evt.to.children).map(el => el.dataset.bookId);
-
-                    const itemsPerPage = 7;
-                    const page = shelfPaginationState[toShelfId] || 1;
-                    const startIndex = (page - 1) * itemsPerPage;
-
-                    const visibleIds = new Set(newOrderedIds);
-                    const hiddenIds = allBookIdsInShelf.filter(id => !visibleIds.has(id));
-
-                    const finalOrder = [
-                        ...hiddenIds.slice(0, startIndex),
-                        ...newOrderedIds,
-                        ...hiddenIds.slice(startIndex)
-                    ];
-
-                    await saveBookOrder(toShelfId, finalOrder);
-                    shelfPaginationState[toShelfId] = oldPage; 
-                } else {
-                    evt.from.insertBefore(evt.item, evt.from.children[evt.oldIndex]);
-
-                    const book = allBooks.find(b => b.id === bookId);
-                    if (!book) return;
-
-                    const handleStatusChange = async (newStatus, extraData = {}) => {
-                        await saveBook({ ...book, status: newStatus, ...extraData, id: book.id });
-                        window.location.hash = `#/edit/${book.id}`;
-                    };
-
-                    const toIsCustom = userShelves.some(s => s.id === toShelfId);
-
-                    if (!toIsCustom) {
-                        if (toShelfId === 'lendo' && book.status !== 'lendo') {
-                            showModal('Iniciar Leitura?', `Deseja registar o início da leitura de "${book.title}"?`, [
-                                { id: 'confirm-start-reading', text: 'Sim', class: 'btn-primary', onClick: () => handleStatusChange('lendo') }
-                            ]);
-                        } else if (toShelfId === 'lido' && book.status !== 'lido') {
-                            showModal('Concluir Leitura?', `Deseja marcar "${book.title}" como concluído? A data de hoje será registada.`, [
-                                {
-                                    id: 'confirm-finish-reading', text: 'Sim, Concluir', class: 'btn-primary', onClick: () => {
-                                        const today = new Date().toISOString().split('T')[0];
-                                        handleStatusChange('lido', { endDate: today });
-                                    }
-                                }
-                            ]);
-                        } else if (book.status !== toShelfId) {
-                            await saveBook({ ...book, status: toShelfId, id: book.id });
-                        }
-                    } else {
-                        let newShelves = book.shelves ? [...book.shelves] : [];
-                        if (!newShelves.includes(toShelfId)) {
-                            newShelves.push(toShelfId);
-                        }
-                        await saveBook({ ...book, shelves: newShelves, id: book.id });
-                    }
-                    shelfPaginationState[fromShelfId] = oldPage;
-                    shelfPaginationState[toShelfId] = newPage;
-                }
-            }
-        });
-    });
-}
-*/
 
 function updateShelfPaginationView(shelfId, page) {
     const shelfContainer = document.querySelector(`.shelf-container[data-shelf-id="${shelfId}"]`);
@@ -1175,6 +1077,94 @@ function renderEstatisticas() {
             </div>
         </div>`;
 }
+
+// NOVA FUNÇÃO PARA A PÁGINA DE FERRAMENTAS
+function renderFerramentas() {
+    const page = document.getElementById('page-ferramentas');
+    if (!page) return;
+
+    page.innerHTML = `
+        <div class="max-w-4xl mx-auto space-y-8">
+            ${getPageHeader('Ferramentas')}
+            
+            <!-- Calculadora de Audiobook -->
+            <div class="card-expressive p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h2 class="font-display text-2xl">Calculadora de Audiolivro</h2>
+                        <p class="text-sm text-neutral-400">Calcule o seu progresso de leitura em áudio.</p>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                    <!-- Inputs -->
+                    <div class="space-y-4">
+                        <div>
+                            <h3 class="font-bold text-neutral-300 mb-2">Tempo TOTAL do Audiolivro</h3>
+                            <div class="grid grid-cols-3 gap-2">
+                                <input type="number" id="total-h" placeholder="Horas" class="audio-calc-input w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 text-center" min="0">
+                                <input type="number" id="total-m" placeholder="Minutos" class="audio-calc-input w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 text-center" min="0" max="59">
+                                <input type="number" id="total-s" placeholder="Segundos" class="audio-calc-input w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 text-center" min="0" max="59">
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-neutral-300 mb-2">Tempo LIDO do Audiolivro</h3>
+                            <div class="grid grid-cols-3 gap-2">
+                                <input type="number" id="read-h" placeholder="Horas" class="audio-calc-input w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 text-center" min="0">
+                                <input type="number" id="read-m" placeholder="Minutos" class="audio-calc-input w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 text-center" min="0" max="59">
+                                <input type="number" id="read-s" placeholder="Segundos" class="audio-calc-input w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 text-center" min="0" max="59">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Resultado -->
+                    <div class="text-center bg-[hsl(var(--md-sys-color-surface))] p-8 rounded-2xl">
+                        <p class="text-lg font-bold text-neutral-400">Progresso</p>
+                        <p id="audio-result" class="font-display text-6xl text-[hsl(var(--md-sys-color-primary))]">0.00%</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Adiciona os 'event listeners' para que a calculadora funcione em tempo real
+    document.querySelectorAll('.audio-calc-input').forEach(input => {
+        input.addEventListener('input', calculateAudiobookPercentage);
+    });
+}
+
+// NOVA FUNÇÃO PARA A LÓGICA DA CALCULADORA
+function calculateAudiobookPercentage() {
+    const getSeconds = (h, m, s) => {
+        const hours = parseInt(document.getElementById(h).value) || 0;
+        const minutes = parseInt(document.getElementById(m).value) || 0;
+        const seconds = parseInt(document.getElementById(s).value) || 0;
+        return (hours * 3600) + (minutes * 60) + seconds;
+    };
+
+    const totalSeconds = getSeconds('total-h', 'total-m', 'total-s');
+    const readSeconds = getSeconds('read-h', 'read-m', 'read-s');
+    const resultElement = document.getElementById('audio-result');
+
+    if (!resultElement) return;
+
+    if (totalSeconds === 0) {
+        resultElement.textContent = '0.00%';
+        return;
+    }
+
+    let percentage = (readSeconds / totalSeconds) * 100;
+
+    if (percentage > 100) {
+        percentage = 100;
+    }
+    if (percentage < 0) {
+        percentage = 0;
+    }
+
+    resultElement.textContent = percentage.toFixed(2) + '%';
+}
+
 
 function renderProfile() {
     const page = document.getElementById('page-profile');
