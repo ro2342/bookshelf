@@ -216,10 +216,14 @@
                 const user = result.user;
 
                 // Save user data to Firestore
+                // ATUALIZADO: Adicionado lektionProgress para inicializar o progresso
                 await db.collection('users').doc(user.uid).set({
                     email: user.email,
                     displayName: user.displayName,
                     theme: selectedTheme,
+                    lektionProgress: {}, // <-- NOVO: Inicializa o objeto de progresso
+                    score: 0,
+                    completedLektions: [],
                     lastLogin: firebase.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
 
