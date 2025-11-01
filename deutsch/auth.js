@@ -2,13 +2,17 @@
 // Refatorado para usar a sintaxe de MÓDULO (import), igual ao 'booktracker/auth.js'
 
 // --- 1. IMPORTAÇÕES (A "TECNOLOGIA DO BOOKTRACKER") ---
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+// ATUALIZADO para a versão 12.5.0 e importações corretas, conforme sua sugestão.
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
+// O import de getAnalytics foi omitido por não ser usado nesta página específica.
 
-// --- 2. CONFIGURAÇÃO (A MESMA DE ANTES) ---
+// --- 2. CONFIGURAÇÃO (CONFORME SUA SUGESTÃO) ---
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-    apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaBiatLUcXU",
+    apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
     authDomain: "deutsch-39779.firebaseapp.com",
     projectId: "deutsch-39779",
     storageBucket: "deutsch-39779.firebasestorage.app",
@@ -18,7 +22,7 @@ const firebaseConfig = {
 };
 
 // --- 3. INICIALIZAÇÃO MODULAR (O NOVO PADRÃO) ---
-// Em vez de 'firebase.app.initializeApp', usamos a função importada
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -125,3 +129,4 @@ document.addEventListener('DOMContentLoaded', () => {
 if (document.readyState === 'interactive' || document.readyState === 'complete') {
     renderThemes();
 }
+
