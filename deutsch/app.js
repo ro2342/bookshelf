@@ -1,5 +1,5 @@
 // app.js - Lógica principal do App Deutsch A1.1 (Vanilla JS)
-// CORREÇÃO: Exercícios agora são uma PÁGINA CHEIA, não um modal.
+// ATUALIZAÇÃO: Salva o progresso por exercício e corrige o modal.
 
 // Importações do Firebase (SDK 9 modular)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
@@ -26,6 +26,7 @@ let profileUnsubscribe = () => {};
 let userProfile = {
     score: 0,
     completedLektions: [],
+    inProgressLektions: {}, // <-- NOVO: Salva progresso (ex: { 1: 3 } -> lição 1, parou no ex 3)
     theme: 'taylorSwift',
     name: 'Estudante',
     avatarUrl: ''
@@ -33,7 +34,6 @@ let userProfile = {
 let currentTheme = 'taylorSwift';
 
 // Dados estáticos (carregados pelos scripts no app.html)
-// Se os arquivos JS não carregarem, estes serão arrays/objetos vazios.
 const allLektions = window.exercisesData || [];
 const allGrammar = window.grammarExplanations || {};
 const allThemes = window.themes || {};
@@ -45,10 +45,6 @@ let userAnswer = '';
 let feedback = null;
 
 // --- FUNÇÃO DE AJUDA PARA ÍCONES ---
-/**
- * Executa o lucide.createIcons() de forma segura, evitando erros
- * caso a biblioteca de ícones falhe ao carregar.
- */
 function safeCreateIcons() {
     if (window.lucide) {
         lucide.createIcons();
@@ -66,22 +62,29 @@ function initFirebase() {
         db = getFirestore(app);
         auth = getAuth(app);
         
-        // Pega o tema salvo no localStorage (se houver) para evitar flash
         const savedTheme = localStorage.getItem('deutschAppTheme');
         if (savedTheme && allThemes[savedTheme]) {
             applyTheme(savedTheme, false);
         }
 
+        // Injeta o estilo para texto secundário (corrige temas claros)
+        const style = document.createElement('style');
+        style.textContent = `
+            .text-secondary {
+                color: var(--text);
+                opacity: 0.7;
+            }
+        `;
+        document.head.appendChild(style);
+
         onAuthStateChanged(auth, (user) => {
             if (user) {
-                // Usuário está logado
                 userId = user.uid;
                 localStorage.setItem('deutschAppUserId', userId);
-                initializeAppLogic(); // <--- Inicia o app
+                initializeAppLogic();
             } else {
-                // Usuário não está logado
                 localStorage.removeItem('deutschAppUserId');
-                window.location.href = 'index.html'; // Redireciona para o login
+                window.location.href = 'index.html';
             }
         });
 
@@ -91,15 +94,13 @@ function initFirebase() {
     }
 }
 
-// Inicia a lógica principal do app
 function initializeAppLogic() {
     console.log("App lógico iniciado para o usuário:", userId);
-    // Esconde o loader SÓ DEPOIS que os dados do perfil carregarem (movido para listenToProfile)
-    listenToProfile(); // Começa a ouvir os dados do usuário
-    window.addEventListener('hashchange', router); // Ouve mudanças no hash (navegação)
+    listenToProfile();
+    window.addEventListener('hashchange', router);
 }
 
-// --- SISTEMA DE TEMAS (Inspirado no BookTracker) ---
+// --- SISTEMA DE TEMAS ---
 
 function applyTheme(themeName, saveToDb = true) {
     const theme = allThemes[themeName];
@@ -108,7 +109,6 @@ function applyTheme(themeName, saveToDb = true) {
         return;
     }
 
-    // Define as variáveis CSS globais
     document.documentElement.style.setProperty('--primary', theme.primary);
     document.documentElement.style.setProperty('--accent', theme.accent);
     document.documentElement.style.setProperty('--bg', theme.bg);
@@ -119,17 +119,15 @@ function applyTheme(themeName, saveToDb = true) {
     currentTheme = themeName;
     localStorage.setItem('deutschAppTheme', themeName);
 
-    // Salva a preferência no Firestore
     if (saveToDb && userId) {
-        saveProfileData({ theme: themeName }, false); // Salva sem mostrar loading
+        saveProfileData({ theme: themeName }, false);
     }
 }
 
 // --- FUNÇÕES DE DADOS (FIRESTORE) ---
 
-// Ouve as mudanças no perfil do usuário
 function listenToProfile() {
-    if (profileUnsubscribe) profileUnsubscribe(); // Cancela o listener anterior
+    if (profileUnsubscribe) profileUnsubscribe();
     if (!userId) return;
 
     const profileDocRef = doc(db, "users", userId, "profile", "data");
@@ -139,31 +137,30 @@ function listenToProfile() {
         if (doc.exists()) {
             const data = doc.data();
             userProfile = {
-                ...userProfile, // Mantém padrões
-                ...data, // Sobrescreve com dados do FB
+                ...userProfile,
+                ...data,
+                inProgressLektions: data.inProgressLektions || {}, // <-- ATUALIZADO
                 name: data.name || googleUser?.displayName || 'Estudante',
                 avatarUrl: data.avatarUrl || googleUser?.photoURL || ''
             };
             console.log("Perfil do usuário carregado:", userProfile);
         } else {
-            // Se não existe, cria um perfil básico
             console.log("Nenhum perfil encontrado, criando um novo...");
             userProfile = {
                 score: 0,
                 completedLektions: [],
+                inProgressLektions: {}, // <-- ATUALIZADO
                 theme: 'taylorSwift',
                 name: googleUser?.displayName || 'Estudante',
                 avatarUrl: googleUser?.photoURL || '',
                 uid: userId,
                 email: googleUser?.email || ''
             };
-            saveProfileData(userProfile, false); // Salva o novo perfil
+            saveProfileData(userProfile, false);
         }
         
-        // Aplica o tema carregado do perfil
         applyTheme(userProfile.theme || 'taylorSwift', false);
         
-        // **IMPORTANTE**: Esconde o loader e renderiza a página SÓ AGORA
         document.getElementById('page-loader').classList.add('hidden');
         router(); 
     }, (error) => {
@@ -172,7 +169,6 @@ function listenToProfile() {
     });
 }
 
-// Função genérica para salvar dados no perfil
 async function saveProfileData(dataToSave, showLoadingFeedback = true) {
     if (!userId) return;
 
@@ -183,7 +179,7 @@ async function saveProfileData(dataToSave, showLoadingFeedback = true) {
         await setDoc(profileDocRef, {
             ...dataToSave,
             lastUpdated: serverTimestamp()
-        }, { merge: true }); // Merge: true para não apagar dados existentes
+        }, { merge: true });
         
         if (showLoadingFeedback) hideModal();
         console.log("Dados salvos com sucesso:", dataToSave);
@@ -199,19 +195,21 @@ async function saveProfileData(dataToSave, showLoadingFeedback = true) {
 const modalContainer = document.getElementById('modal-container');
 const modalContent = document.getElementById('modal-content');
 
-function showModal(title, contentHtml, maxWidth = '600px') {
+// ATUALIZADO: Remove 'maxWidth' - agora é controlado pelo CSS
+function showModal(title, contentHtml) {
     modalContent.innerHTML = `
         <button id="modal-close-btn" class="modal-close-btn">
             <i data-lucide="x" class="w-6 h-6"></i>
         </button>
-        <h2 class="text-2xl font-bold mb-6" style="color: var(--primary);">${title}</h2>
-        <div id="modal-body">${contentHtml}</div>
+        <!-- Título agora usa uma cor fixa legível no fundo branco -->
+        <h2 class="text-2xl font-bold mb-6" style="color: #667eea;">${title}</h2>
+        <!-- 'prose' adicionado para estilizar o HTML da gramática -->
+        <div id="modal-body" class="prose">${contentHtml}</div>
     `;
-    modalContent.style.maxWidth = maxWidth;
+    // modalContent.style.maxWidth = maxWidth; // <-- LINHA REMOVIDA
     modalContainer.classList.remove('hidden');
-    safeCreateIcons(); // Recria ícones dentro do modal
+    safeCreateIcons();
 
-    // Adiciona listeners
     modalContainer.addEventListener('click', hideModal);
     modalContent.addEventListener('click', (e) => e.stopPropagation());
     document.getElementById('modal-close-btn').addEventListener('click', hideModal);
@@ -221,12 +219,6 @@ function showModal(title, contentHtml, maxWidth = '600px') {
 function hideModal() {
     modalContainer.classList.add('hidden');
     modalContent.innerHTML = '';
-    
-    // REMOVIDO: Lógica de voltar ao mapa, pois o modal não é mais para lições
-    // if (window.location.hash.startsWith('#/lektion/')) {
-    //     window.location.hash = '#/map';
-    // }
-
     document.removeEventListener('keydown', handleEscKey);
 }
 
@@ -249,7 +241,6 @@ function showLoading(message = 'Carregando...') {
     modalContent.style.maxWidth = '300px';
     modalContainer.classList.remove('hidden');
     
-    // Remove listeners de fechar
     modalContainer.removeEventListener('click', hideModal);
     document.removeEventListener('keydown', handleEscKey);
 }
@@ -269,36 +260,31 @@ function parseSimpleMarkdown(text) {
         if (processedLine.trim().startsWith('• ')) {
             let itemContent = processedLine.trim().substring(2).trim();
             if (!inList) {
-                // Inicia a lista
                 inList = true;
-                return '<ul><li class="mb-1 ml-4 list-disc">' + itemContent + '</li>';
+                return '<ul><li class="mb-1">' + itemContent + '</li>'; // Tailwind 'prose' cuida do estilo
             } else {
-                // Continua a lista
-                return '<li class="mb-1 ml-4 list-disc">' + itemContent + '</li>';
+                return '<li class="mb-1">' + itemContent + '</li>';
             }
         } else {
-            // Não é um item de lista
             if (inList) {
-                // Fecha a lista anterior
                 inList = false;
-                return '</ul>' + processedLine; // Adiciona a linha atual após fechar a lista
+                return '</ul>' + processedLine; 
             }
-            return processedLine; // Linha normal
+            return processedLine;
         }
     });
 
-    // Se a lista ainda estiver aberta no final, fecha ela
     if (inList) {
         processedLines.push('</ul>');
     }
 
-    // Junta as linhas de volta. O 'whitespace-pre-line' cuidará das quebras de linha.
+    // O 'whitespace-pre-line' no CSS cuidará das quebras de linha
     return processedLines.join('\n');
 }
 
-// --- ROUTER (Inspirado no BookTracker) ---
 
-// ADICIONADO 'exercise' às páginas
+// --- ROUTER ---
+
 const pages = ['home', 'map', 'progress', 'settings', 'exercise'];
 
 function hideAllPages() {
@@ -306,28 +292,23 @@ function hideAllPages() {
         const pageEl = document.getElementById(`page-${pageId}`);
         if (pageEl) pageEl.classList.add('hidden');
     });
-    // Não mexemos no loader aqui, ele é controlado pelo listenToProfile
 }
 
 function router() {
-    if (!userId) return; // Não faz nada se os dados do usuário ainda não carregaram
+    if (!userId) return;
 
     const currentHash = window.location.hash || '#/home';
     const [path, param] = currentHash.substring(2).split('/');
-
-    // REMOVIDA Rota de Modal para 'lektion'
     
     if (path === 'menu') {
-        renderMenuInModal(); // AINDA PODE SER USADO PARA UM MENU FUTURO
+        renderMenuInModal();
         return;
     }
 
-    // Se nenhuma rota de modal foi ativada, garante que o modal esteja fechado
     if (!modalContainer.classList.contains('hidden')) {
         hideModal();
     }
 
-    // Rotas de Página
     hideAllPages();
     updateNavLinks(currentHash);
 
@@ -339,38 +320,35 @@ function router() {
             case 'map': renderMap(); break;
             case 'progress': renderProgress(); break;
             case 'settings': renderSettings(); break;
-            // ADICIONADA Rota para a página de exercício
             case 'exercise': renderExercisePage(); break;
             default:
                 document.getElementById('page-home').classList.remove('hidden');
                 renderHome();
         }
     } else {
-        // Fallback para home
         document.getElementById('page-home').classList.remove('hidden');
         renderHome();
     }
     
-    safeCreateIcons(); // Atualiza ícones na página
+    safeCreateIcons();
 }
 
 function updateNavLinks(activeHash) {
     document.querySelectorAll('.nav-link').forEach(link => {
         const linkHash = new URL(link.href, window.location.origin).hash;
         
-        // Trata o caso da página de exercício (nenhum nav deve estar ativo)
         if (activeHash.startsWith('#/exercise')) {
              link.classList.remove('active');
-             link.classList.add('text-gray-400');
+             link.classList.add('text-secondary');
              return;
         }
 
         if (linkHash === activeHash) {
             link.classList.add('active');
-            link.classList.remove('text-gray-400');
+            link.classList.remove('text-secondary');
         } else {
             link.classList.remove('active');
-            link.classList.add('text-gray-400');
+            link.classList.add('text-secondary');
         }
     });
 }
@@ -384,7 +362,7 @@ function getPageHeader(title) {
             <img src="${avatarUrl}" alt="Avatar" class="w-16 h-16 rounded-full object-cover shadow-lg border-2" style="border-color: var(--primary);">
             <div>
                 <h1 class="font-bold text-3xl md:text-4xl">${title}</h1>
-                <p class="text-lg text-gray-400">Olá, ${userProfile.name.split(' ')[0]}!</p>
+                <p class="text-lg text-secondary">Olá, ${userProfile.name.split(' ')[0]}!</p>
             </div>
         </div>
     `;
@@ -400,7 +378,7 @@ function renderHome() {
             ${getPageHeader('Início')}
             <div class="card p-6 text-center">
                 <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
-                <p class="text-gray-300">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
+                <p class="text-secondary">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
             </div>
         `;
         return;
@@ -412,20 +390,20 @@ function renderHome() {
         ${getPageHeader('Início')}
         <div class="card p-6 mb-6">
             <h2 class="text-xl font-bold mb-4">Bem-vindo(a) de volta!</h2>
-            <p class="text-gray-300 mb-6">Continue de onde parou. Seu progresso é salvo automaticamente na nuvem.</p>
-            <button id="go-to-map-btn" class="btn-primary w-full text-lg">
+            <p class="text-secondary mb-6">Continue de onde parou. Seu progresso é salvo automaticamente na nuvem.</p>
+            <button id="go-to-map-btn" class="btn-primary w-full text-lg p-4 rounded-lg font-semibold">
                 Ir para o Mapa de Aulas →
             </button>
         </div>
         
         <div class="card p-6">
             <h2 class="text-xl font-bold mb-4">Seu Progresso</h2>
-            <div class="mb-2 flex justify-between font-medium text-gray-300">
+            <div class="mb-2 flex justify-between font-medium text-secondary">
                 <span>Lições Completas</span>
                 <span>${completedCount} / ${totalLektions}</span>
             </div>
-            <div class="progress-bar mb-4">
-                <div class="progress-fill" style="width: ${progress}%;"></div>
+            <div class="progress-bar rounded-full h-3 overflow-hidden mb-4">
+                <div class="progress-fill h-full rounded-full" style="width: ${progress}%;"></div>
             </div>
             <div class="text-center text-2xl font-bold" style="color: var(--primary);">${Math.round(progress)}%</div>
         </div>
@@ -437,13 +415,14 @@ function renderHome() {
 function renderMap() {
     const page = document.getElementById('page-map');
     const completed = userProfile.completedLektions || [];
+    const inProgress = userProfile.inProgressLektions || {};
 
     if (allLektions.length === 0) {
         page.innerHTML = `
             ${getPageHeader('Mapa de Aprendizado')}
             <div class="card p-6 text-center">
                 <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
-                <p class="text-gray-300">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
+                <p class="text-secondary">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>). Verifique se o arquivo está no lugar correto e recarregLektione a página.</p>
             </div>
         `;
         return;
@@ -454,35 +433,38 @@ function renderMap() {
         <div class="space-y-4">
             ${allLektions.map((lektion, index) => {
                 const isCompleted = completed.includes(lektion.id);
-                // A primeira lição está sempre desbloqueada.
-                // As seguintes são desbloqueadas se a anterior foi completada.
                 const isLocked = index > 0 && !completed.includes(allLektions[index - 1].id);
-                
+                const progressIndex = inProgress[lektion.id] || 0;
+                const isStarted = progressIndex > 0 && !isCompleted;
+
                 return `
                     <div 
                         id="lektion-${lektion.id}"
-                        class="card p-5 flex items-center gap-4 lektion-card ${isLocked ? 'locked' : 'cursor-pointer hover:bg-gray-800'}"
+                        class="card p-5 flex items-center gap-4 lektion-card rounded-lg ${isLocked ? 'locked' : 'cursor-pointer hover:opacity-80'}"
                         data-lektion-id="${lektion.id}"
                     >
-                        <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl" style="background-color: ${isLocked ? 'var(--border)' : 'var(--primary)'}; color: ${isLocked ? 'var(--text-opacity-50)' : 'white'};">
+                        <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl" style="background-color: ${isLocked ? 'var(--border)' : 'var(--primary)'}; color: ${isLocked ? 'var(--text)' : 'white'}; opacity: ${isLocked ? '0.7' : '1'};">
                             ${isLocked ? '<i data-lucide="lock" class="w-6 h-6"></i>' : (isCompleted ? '<i data-lucide="check" class="w-6 h-6"></i>' : index + 1)}
                         </div>
                         <div class="flex-grow">
                             <h3 class="text-lg font-bold">${lektion.title}</h3>
-                            <p class="text-sm text-gray-400">${lektion.topics.join(', ')}</p>
+                            <p class="text-sm text-secondary">${lektion.topics.join(', ')}</p>
+                            ${isStarted ? `
+                                <div class="mt-2">
+                                    <span class="text-xs font-medium px-2 py-1 rounded-full" style="background-color: var(--accent); color: white;">Em progresso</span>
+                                </div>
+                            ` : ''}
                         </div>
-                        ${!isLocked ? '<i data-lucide="chevron-right" class="w-6 h-6 text-gray-500"></i>' : ''}
+                        ${!isLocked ? '<i data-lucide="chevron-right" class="w-6 h-6 text-secondary"></i>' : ''}
                     </div>
                 `;
             }).join('')}
         </div>
     `;
 
-    // Adiciona event listeners para os cards de lição
     document.querySelectorAll('.lektion-card:not(.locked)').forEach(card => {
         card.onclick = () => {
             const lektionId = card.dataset.lektionId;
-            // MUDADO: Chama a função startLektion em vez de mudar o hash
             startLektion(parseInt(lektionId));
         };
     });
@@ -499,27 +481,27 @@ function renderProgress() {
     page.innerHTML = `
         ${getPageHeader('Progresso')}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="card p-6 text-center">
-                <h2 class="text-lg font-medium text-gray-400 mb-2">Pontos Totais</h2>
+            <div class="card p-6 text-center rounded-lg">
+                <h2 class="text-lg font-medium text-secondary mb-2">Pontos Totais</h2>
                 <div class="text-5xl font-bold" style="color: var(--primary);">${score}</div>
-                <i data-lucide="award" class="w-12 h-12 mx-auto mt-4 text-gray-500"></i>
+                <i data-lucide="award" class="w-12 h-12 mx-auto mt-4 text-secondary"></i>
             </div>
-            <div class="card p-6 text-center">
-                <h2 class="text-lg font-medium text-gray-400 mb-2">Lições Completas</h2>
+            <div class="card p-6 text-center rounded-lg">
+                <h2 class="text-lg font-medium text-secondary mb-2">Lições Completas</h2>
                 <div class="text-5xl font-bold" style="color: var(--accent);">${completedCount} / ${totalLektions || 'N/A'}</div>
-                <i data-lucide="check-circle" class="w-12 h-12 mx-auto mt-4 text-gray-500"></i>
+                <i data-lucide="check-circle" class="w-12 h-12 mx-auto mt-4 text-secondary"></i>
             </div>
-            <div class="card p-6 md:col-span-2">
+            <div class="card p-6 md:col-span-2 rounded-lg">
                 <h2 class="text-xl font-bold mb-4">Lições Completadas</h2>
                 ${(completedCount > 0 && allLektions.length > 0) ? `
                     <ul class="space-y-3">
                         ${userProfile.completedLektions.map(id => {
                             const lektion = allLektions.find(l => l.id === id);
-                            return lektion ? `<li class="flex items-center gap-3 text-gray-300"><i data-lucide="check" class="w-5 h-5 text-green-500"></i> ${lektion.title}</li>` : '';
+                            return lektion ? `<li class="flex items-center gap-3 text-secondary"><i data-lucide="check" class="w-5 h-5 text-green-500"></i> ${lektion.title}</li>` : '';
                         }).join('')}
                     </ul>
                 ` : `
-                    <p class="text-gray-400 text-center py-4">Você ainda não completou nenhuma lição. Vá para o Mapa para começar!</p>
+                    <p class="text-secondary text-center py-4">Você ainda não completou nenhuma lição. Vá para o Mapa para começar!</p>
                 `}
             </div>
         </div>
@@ -534,9 +516,9 @@ function renderSettings() {
     if (Object.keys(allThemes).length === 0) {
          page.innerHTML = `
             ${getPageHeader('Configurações')}
-            <div class="card p-6 text-center">
+            <div class="card p-6 text-center rounded-lg">
                 <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
-                <p class="text-gray-300">Não foi possível carregar os dados dos temas (<code>themes.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
+                <p class="text-secondary">Não foi possível carregar os dados dos temas (<code>themes.js</code>). Verifique se o arquivo está no lugar correto e recarregLektione a página.</p>
             </div>
         `;
         return;
@@ -547,7 +529,7 @@ function renderSettings() {
     page.innerHTML = `
         ${getPageHeader('Configurações')}
         
-        <div class="card p-6 mb-6">
+        <div class="card p-6 mb-6 rounded-lg">
             <h2 class="text-xl font-bold mb-4">Tema do Aplicativo</h2>
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 ${Object.keys(allThemes).map(themeName => {
@@ -566,21 +548,20 @@ function renderSettings() {
             </div>
         </div>
 
-        <div class="card p-6">
+        <div class="card p-6 rounded-lg">
             <h2 class="text-xl font-bold mb-4">Conta</h2>
-            <p class="text-gray-300 mb-4">Você está logado como ${userProfile.name} (${userProfile.email || 'sem e-mail'}).</p>
-            <button id="logout-btn" class="btn-secondary w-full" style="border-color: #ef4444; color: #ef4444;">
+            <p class="text-secondary mb-4">Você está logado como ${userProfile.name} (${userProfile.email || 'sem e-mail'}).</p>
+            <button id="logout-btn" class="btn-secondary w-full p-3 rounded-lg font-semibold" style="border-color: #ef4444; color: #ef4444;">
                 Sair (Logout)
             </button>
         </div>
     `;
 
-    // Adiciona listeners
     document.querySelectorAll('.theme-option').forEach(btn => {
         btn.onclick = () => {
             const themeName = btn.dataset.theme;
-            applyTheme(themeName, true); // Salva no DB
-            renderSettings(); // Re-renderiza para mostrar a seleção
+            applyTheme(themeName, true);
+            renderSettings();
         };
     });
     
@@ -597,12 +578,8 @@ function renderSettings() {
     };
 }
 
-// --- LÓGICA DE LIÇÃO E EXERCÍCIOS (AGORA EM PÁGINA CHEIA) ---
+// --- LÓGICA DE LIÇÃO E EXERCÍCIOS ---
 
-/**
- * Inicia uma lição. Chamado pelo clique no mapa.
- * Prepara o estado e navega para a página de exercício.
- */
 function startLektion(lektionId) {
     const lektion = allLektions.find(l => l.id === lektionId);
     if (!lektion) {
@@ -610,62 +587,56 @@ function startLektion(lektionId) {
         return;
     }
 
-    // Reseta o estado da lição
     currentLektion = lektion;
-    currentExerciseIndex = 0;
+    
+    // *** ATUALIZADO: Carrega o progresso salvo ***
+    const savedIndex = userProfile.inProgressLektions ? (userProfile.inProgressLektions[lektion.id] || 0) : 0;
+    // Se o índice salvo for igual ao total, significa que ele terminou mas não "finalizou"
+    // Reinicia do zero nesse caso.
+    currentExerciseIndex = savedIndex >= lektion.exercises.length ? 0 : savedIndex;
+    
     userAnswer = '';
     feedback = null;
 
-    // Navega para a página de exercício
     window.location.hash = '#/exercise';
 }
 
-/**
- * Renderiza a PÁGINA de exercício (substitui renderLektionInModal)
- */
 function renderExercisePage() {
     const page = document.getElementById('page-exercise');
 
     if (!currentLektion) {
         page.innerHTML = `
             <h2 class="text-2xl font-bold mb-4 text-red-500">Erro</h2>
-            <p class="text-gray-300 mb-6">Nenhuma lição está selecionada.</p>
-            <button id="back-to-map" class="btn-primary">Voltar ao Mapa</button>
+            <p class="text-secondary mb-6">Nenhuma lição está selecionada.</p>
+            <button id="back-to-map" class="btn-primary p-3 rounded-lg">Voltar ao Mapa</button>
         `;
         document.getElementById('back-to-map').onclick = () => window.location.hash = '#/map';
         return;
     }
     
-    // O conteúdo agora é uma página inteira
     page.innerHTML = `
-        <div class="exercise-page-header">
+        <div class="exercise-page-header flex items-center gap-4 py-4">
             <button id="back-to-map-btn" class="btn-secondary" style="padding: 0.5rem 0.75rem;">
                 <i data-lucide="arrow-left" class="w-6 h-6"></i>
             </button>
-            <div>
-                <h1 class="text-2xl md:text-3xl font-bold" style="color: var(--primary);">${currentLektion.title}</h1>
-                <p class="text-gray-400">Exercício ${currentExerciseIndex + 1} de ${currentLektion.exercises.length}</p>
+            <div class="flex-grow">
+                <h1 class="text-xl md:text-2xl font-bold" style="color: var(--primary);">${currentLektion.title}</h1>
+                <p class="text-secondary text-sm">Exercício ${currentExerciseIndex + 1} de ${currentLektion.exercises.length}</p>
             </div>
         </div>
         <div id="exercise-container-page"></div>
     `;
     
     document.getElementById('back-to-map-btn').onclick = () => {
-        // Confirmação para sair
-        // REMOVIDO: O confirm() não funciona bem no ambiente de iframe.
-        // if (confirm("Você tem certeza que quer sair? Seu progresso neste exercício não será salvo.")) {
-            currentLektion = null; // Limpa a lição atual
-            window.location.hash = '#/map';
-        // }
+        // Não precisa mais de 'confirm' pois o progresso está salvo
+        currentLektion = null;
+        window.location.hash = '#/map';
     };
     
     safeCreateIcons();
-    renderCurrentExerciseOnPage(); // Renderiza o exercício atual dentro da página
+    renderCurrentExerciseOnPage();
 }
 
-/**
- * Renderiza o exercício ATUAL dentro da página de exercício
- */
 function renderCurrentExerciseOnPage() {
     const container = document.getElementById('exercise-container-page');
     if (!container || !currentLektion) return;
@@ -679,7 +650,7 @@ function renderCurrentExerciseOnPage() {
             <input 
                 type="text"
                 id="exercise-input"
-                class="input-field"
+                class="input-field w-full p-4 text-lg rounded-lg"
                 placeholder="Digite sua resposta..."
                 value="${userAnswer}"
                 ${feedback ? 'disabled' : ''}
@@ -690,10 +661,10 @@ function renderCurrentExerciseOnPage() {
             <div class="flex flex-col gap-3">
                 ${exercise.options.map(option => `
                     <button 
-                        class="btn-secondary text-left p-4 text-base w-full ${userAnswer === option ? '!bg-var(--primary) !text-white' : ''}"
+                        class="btn-secondary text-left p-4 text-base w-full rounded-lg"
                         data-option="${option}"
                         ${feedback ? 'disabled' : ''}
-                        style="${userAnswer === option ? `background-color: var(--primary); color: white; border-color: var(--primary);` : ''}"
+                        style="${userAnswer === option ? `background-color: var(--primary); color: white; border-color: var(--primary);` : `color: var(--text); border-color: var(--border);`}"
                     >
                         ${option}
                     </button>
@@ -703,22 +674,17 @@ function renderCurrentExerciseOnPage() {
     }
 
     container.innerHTML = `
-        <!-- Progresso -->
-        <div class="card p-4 mb-6">
-            <div class="progress-bar" style="margin: 0;">
-                <div class="progress-fill" style="width: ${progress}%;"></div>
+        <div class="card p-4 mb-6 rounded-lg">
+            <div class="progress-bar rounded-full h-3 overflow-hidden" style="margin: 0;">
+                <div class="progress-fill h-full rounded-full" style="width: ${progress}%;"></div>
             </div>
         </div>
 
-        <!-- Pergunta e Resposta -->
-        <div class="card p-6">
-            <!-- Pergunta -->
-            <h3 class="text-xl font-medium mb-6">${exercise.question.replace(/___/g, '<span class="font-bold text-gray-400">___</span>')}</h3>
+        <div class="card p-6 rounded-lg">
+            <h3 class="text-xl font-medium mb-6">${exercise.question.replace(/___/g, '<span class="font-bold text-secondary">___</span>')}</h3>
             
-            <!-- Input -->
             <div class="mb-4">${inputHtml}</div>
             
-            <!-- Feedback -->
             <div id="feedback-container">
                 ${feedback ? `
                     <div class="feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}">
@@ -731,49 +697,44 @@ function renderCurrentExerciseOnPage() {
                 ` : ''}
             </div>
             
-            <!-- Botões de Ação -->
             <div class="flex gap-4 mt-8 pt-6 border-t" style="border-color: var(--border);">
-                <button id="grammar-btn" class="btn-secondary">
+                <button id="grammar-btn" class="btn-secondary p-3 rounded-lg flex items-center">
                     <i data-lucide="book-open" class="w-5 h-5 mr-2"></i> Gramática
                 </button>
-                <button id="action-btn" class="btn-primary flex-grow" ${(!userAnswer && !feedback) ? 'disabled' : ''}>
+                <button id="action-btn" class="btn-primary flex-grow p-3 rounded-lg font-semibold" ${(!userAnswer && !feedback) ? 'disabled' : ''}>
                     ${feedback ? 'Próximo →' : 'Verificar'}
                 </button>
             </div>
         </div>
     `;
 
-    // Adiciona Listeners
     if (exercise.type === 'fillBlank' || exercise.type === 'translation') {
         const input = document.getElementById('exercise-input');
         const actionBtn = document.getElementById('action-btn');
         input.oninput = (e) => {
             userAnswer = e.target.value;
-            if (!feedback) actionBtn.disabled = !userAnswer; // Ativa/desativa o botão
+            if (!feedback) actionBtn.disabled = !userAnswer;
         };
         input.onkeydown = (e) => {
             if (e.key === 'Enter' && !feedback && userAnswer) document.getElementById('action-btn').click();
         };
         if (!feedback) input.focus();
     } else if (exercise.type === 'multipleChoice') {
-        document.querySelectorAll('.btn-secondary[data-option]').forEach(btn => {
+        document.querySelectorAll('button[data-option]').forEach(btn => {
             btn.onclick = () => {
                 if (feedback) return;
                 userAnswer = btn.dataset.option;
-                renderCurrentExerciseOnPage(); // Re-renderiza para mostrar a seleção
+                renderCurrentExerciseOnPage();
             };
         });
     }
     
-    document.getElementById('grammar-btn').onclick = showGrammarModal; // Continua abrindo gramática no modal
+    document.getElementById('grammar-btn').onclick = showGrammarModal;
     document.getElementById('action-btn').onclick = feedback ? nextExercise : checkAnswer;
     
     safeCreateIcons();
 }
 
-/**
- * Abre o modal de gramática (sem alterações)
- */
 function showGrammarModal() {
     if (!currentLektion) return;
 
@@ -788,26 +749,23 @@ function showGrammarModal() {
             return `<p class="text-red-500">Erro: Tópico de gramática "${key}" não encontrado.</p>`;
         }
         
-        // *** LINHA MODIFICADA ***
-        // Usa a nova função para "traduzir" o Markdown
         const parsedContent = parseSimpleMarkdown(explanation.content);
 
         return `
             <div class="mb-6">
-                <h3 class="text-xl font-bold mb-3" style="color: var(--accent);">${explanation.title}</h3>
-                <div class="text-gray-300 whitespace-pre-line leading-relaxed break-words">
+                <!-- Título agora usa a cor do tema 'dark' (legível no branco) -->
+                <h3 class="text-xl font-bold mb-3" style="color: #bb86fc;">${explanation.title}</h3>
+                <div class="text-secondary whitespace-pre-line leading-relaxed break-words">
                     ${parsedContent}
                 </div>
             </div>
         `;
     }).join('');
     
-    showModal("Explicações Gramaticais 📚", grammarHtml, '900px');
+    // ATUALIZADO: Remove '900px' - largura é controlada pelo CSS
+    showModal("Explicações Gramaticais 📚", grammarHtml);
 }
 
-/**
- * Verifica a resposta (sem alterações, mas agora re-renderiza a PÁGINA)
- */
 function checkAnswer() {
     if (!userAnswer) return;
     
@@ -816,12 +774,11 @@ function checkAnswer() {
     const correctAns = exercise.answer.toLowerCase();
     const alternatives = exercise.alternatives?.map(a => a.toLowerCase()) || [];
 
-    // Lógica de checagem (igual ao React app)
     const correctAnswers = [correctAns, ...alternatives];
     const isCorrect = correctAnswers.some(ans => {
         if (ans.includes('|')) {
             const parts = ans.split('|');
-            const userParts = userAns.split(/[\s,|]+/); // Aceita espaço, vírgula ou | como separador
+            const userParts = userAns.split(/[\s,|]+/);
             return parts.every((part, idx) => userParts[idx] === part);
         }
         return userAns === ans;
@@ -833,53 +790,55 @@ function checkAnswer() {
     };
 
     if (isCorrect) {
-        // Adiciona pontos
         const newScore = (userProfile.score || 0) + 10;
-        userProfile.score = newScore; // Atualiza localmente
-        saveProfileData({ score: newScore }, false); // Salva no FB sem loading
+        userProfile.score = newScore;
+        
+        // *** ATUALIZADO: Salva o progresso do *próximo* índice ***
+        const nextIndex = currentExerciseIndex + 1;
+        const newProgress = { ...(userProfile.inProgressLektions || {}), [currentLektion.id]: nextIndex };
+        userProfile.inProgressLektions = newProgress;
+        
+        // Salva pontuação E progresso da lição
+        saveProfileData({ score: newScore, inProgressLektions: newProgress }, false); 
     }
     
-    renderCurrentExerciseOnPage(); // MUDADO: Renderiza na página
+    renderCurrentExerciseOnPage();
 }
 
-/**
- * Avança para o próximo exercício (sem alterações)
- */
 async function nextExercise() {
     if (currentExerciseIndex < currentLektion.exercises.length - 1) {
-        // Próximo exercício
         currentExerciseIndex++;
         userAnswer = '';
         feedback = null;
-        renderCurrentExerciseOnPage(); // MUDADO: Renderiza na página
+        renderCurrentExerciseOnPage();
     } else {
-        // Finalizou a lição
         await finishLektion();
     }
 }
 
-/**
- * Finaliza a lição (agora navega para o mapa)
- */
 async function finishLektion() {
-    showLoading("Salvando progresso..."); // USA O MODAL para loading
+    showLoading("Salvando progresso...");
     
     const completed = userProfile.completedLektions || [];
     if (!completed.includes(currentLektion.id)) {
         completed.push(currentLektion.id);
-        userProfile.completedLektions = completed; // Atualiza local
-        await saveProfileData({ completedLektions: completed }, false); // Salva no FB
+        userProfile.completedLektions = completed;
     }
     
-    hideModal(); // Fecha o modal de "Salvando..."
-    currentLektion = null; // Limpa a lição
-    window.location.hash = '#/map'; // Volta para o mapa
-    // O router vai rodar e re-renderizar o mapa com a lição completa
+    // *** ATUALIZADO: Remove do "em progresso" ***
+    const newProgress = { ...(userProfile.inProgressLektions || {}) };
+    delete newProgress[currentLektion.id];
+    userProfile.inProgressLektions = newProgress;
+    
+    // Salva AMBAS as mudanças
+    await saveProfileData({ completedLektions: completed, inProgressLektions: newProgress }, false);
+    
+    hideModal();
+    currentLektion = null;
+    window.location.hash = '#/map';
 }
 
 // --- INICIALIZAÇÃO DO APP ---
-// Executa o initFirebase assim que o script for lido,
-// como ele está no fim do <body>, o DOM estará pronto.
 initFirebase();
 
 

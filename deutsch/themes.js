@@ -1,11 +1,11 @@
-// themes.js - Definições dos 14 temas baseados em álbuns da Taylor Swift
+// themes.js - Definições dos 14 temas (COM AJUSTES DE CONTRASTE)
 
 window.themes = {
     light: {
         name: 'Light',
         primary: '#667eea',
         bg: '#ffffff',
-        text: '#333333',
+        text: '#2d3748', // Texto mais escuro para melhor leitura
         card: '#f8f9fa',
         accent: '#764ba2',
         border: '#e0e0e0'
@@ -15,25 +15,25 @@ window.themes = {
         name: 'Dark',
         primary: '#bb86fc',
         bg: '#121212',
-        text: '#ffffff',
+        text: '#f7fafc', // Texto mais claro
         card: '#1e1e1e',
         accent: '#03dac6',
         border: '#333333'
     },
     
     taylorSwift: {
-     name: 'Debut',
-primary: '#1BAEC6', // Turquesa/Azul-água
-        bg: '#E7DBCC',      // Bege claro
-        text: '#1D4737',      // Verde/Azul escuro (para texto)
-        card: '#f5f5f5',      // Um branco leve para card
-        accent: '#81A757',    // Verde claro
-        border: '#D4C8BC'     // Borda em tom de bege
+        name: 'Taylor Swift',
+        primary: '#a58a2a', // Escurecido para contraste
+        bg: '#faf8f3',
+        text: '#2a2a2a', // Texto bem escuro
+        card: '#f5f0e8',
+        accent: '#c9a961',
+        border: '#e8dcc8'
     },
     
     fearless: {
         name: 'Fearless',
-        primary: '#d4af37',
+        primary: '#b89b2e', // Escurecido para contraste
         bg: '#fffef9',
         text: '#3d3019',
         card: '#faf5e4',
@@ -43,11 +43,11 @@ primary: '#1BAEC6', // Turquesa/Azul-água
     
     speakNow: {
         name: 'Speak Now',
-        primary: '#9b59b6',
+        primary: '#8e44ad', // 'accent' virou 'primary'
         bg: '#f9f5ff',
         text: '#2d2033',
         card: '#f0e6ff',
-        accent: '#8e44ad',
+        accent: '#9b59b6',
         border: '#d8c3e8'
     },
     
@@ -71,14 +71,15 @@ primary: '#1BAEC6', // Turquesa/Azul-água
         border: '#b3d9f2'
     },
     
+    // ATUALIZADO: Fundo preto
     reputation: {
         name: 'Reputation',
-        primary: '#7f8c8d',
-        bg: '#2c3e50',
-        text: '#ecf0f1',
-        card: '#34495e',
-        accent: '#95a5a6',
-        border: '#4a5f7f'
+        primary: '#cccccc', // Cinza claro para contraste
+        bg: '#111111', // Preto
+        text: '#f5f5f5', // Texto branco
+        card: '#1e1e1e', // Card escuro
+        accent: '#95a5a6', // Cinza médio
+        border: '#333333'
     },
     
     lover: {
@@ -93,11 +94,11 @@ primary: '#1BAEC6', // Turquesa/Azul-água
     
     folklore: {
         name: 'Folklore',
-        primary: '#95a5a6',
+        primary: '#808f8f', // Um pouco mais escuro
         bg: '#f5f5f5',
         text: '#2c3e50',
         card: '#ecf0f1',
-        accent: '#7f8c8d',
+        accent: '#95a5a6',
         border: '#bdc3c7'
     },
     
@@ -111,9 +112,10 @@ primary: '#1BAEC6', // Turquesa/Azul-água
         border: '#d4c4b0'
     },
     
+    // O seu favorito, mantido como está
     midnights: {
         name: 'Midnights',
-        primary: '#5656e8',
+        primary: '#191970',
         bg: '#0f0f1e',
         text: '#e8e8ff',
         card: '#1a1a3e',
@@ -131,14 +133,15 @@ primary: '#1BAEC6', // Turquesa/Azul-água
         border: '#c0c0cc'
     },
     
+    // ATUALIZADO: Cores mais coesas
     showgirl: {
-name: 'TLOAS',
-primary: '#E57118', // Laranja principal (predominante)
-        bg: '#F28C42',      // Fundo neutro claro (mantido para legibilidade)
-        text: '#55703E',      // Verde escuro (como sugerido para o texto)
-        card: '#FFFFFF',      // Fundo do card branco (para máximo contraste do texto)
-        accent: '#61B498',    // O tom de verde/azul (teal)
-        border: '#F28C42'     // Laranja mais claro para bordas
-        // Opcional: Você pode usar o '#A64416' (laranja escuro) para títulos
+        name: 'TLOAS',
+        primary: '#f5a623', // Laranja dourado
+        bg: '#fef9f3', // Fundo creme
+        text: '#3a2e1f', // Texto marrom escuro
+        card: '#fff5e8', // Card creme claro
+        accent: '#f7c35f', // Laranja mais claro
+        border: '#f8e6ce'
     }
 };
+
