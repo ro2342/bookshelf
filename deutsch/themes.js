@@ -132,7 +132,7 @@ window.themes = {
     },
     
     showgirl: {
-        name: 'Eras Tour',
+        name: 'TLOAS',
         primary: '#ff6b35',
         bg: '#fffaf5',
         text: '#2d1f1a',
