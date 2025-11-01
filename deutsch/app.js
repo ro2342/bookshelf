@@ -113,8 +113,7 @@ const App = () => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    }, [currentView, showMenu, showGrammar, feedback]); // Re-run when view or modals change
-
+    }, [currentView, showMenu, showGrammar, feedback, loading]); // <-- CORREÇÃO: Adicionado 'loading'
     
     // (A função loadUserData foi removida pois sua lógica agora está no useEffect acima)
 
