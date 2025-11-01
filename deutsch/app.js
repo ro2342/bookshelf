@@ -1,5 +1,6 @@
 // app.js - Aplicativo React Completo
-// VERSÃO CORRIGIDA: Corrige lentidão de ícones e usa .set({ merge: true }) para salvar.
+// VERSÃO CORRIGIDA: Reverte a lógica dos ícones para a original (estável)
+// e mantém as correções de 'startLektion' e 'saveUserData'.
 
 // Firebase Configuration
 const firebaseConfig = {
@@ -48,14 +49,15 @@ const App = () => {
         return () => unsubscribe();
     }, []);
 
-    // *** CORREÇÃO ÍCONES LENTOS ***
-    // Roda o createIcons() sempre que uma nova "janela" (view ou modal) é mostrada.
-    // Isso é mais eficiente que o [currentView] original e corrige o bug de não carregar.
+    // *** CORREÇÃO TELA BRANCA ***
+    // Revertido para a lógica original do seu app.
+    // Isso é estável e funcional, e recarrega os ícones
+    // ao mudar de aba (Início, Mapa, Progresso).
     React.useEffect(() => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    }, [currentView, showMenu, showGrammar]);
+    }, [currentView]); // <-- Revertido para a dependência original.
 
     // Load user data from Firestore
     const loadUserData = async (uid) => {
@@ -66,7 +68,6 @@ const App = () => {
             if (doc.exists) {
                 const data = doc.data();
                 
-                // Garante que os campos de progresso existam
                 if (!data.completedLektions) {
                     data.completedLektions = [];
                 }
@@ -76,7 +77,7 @@ const App = () => {
                 
                 const userTheme = data.theme || 'taylorSwift';
                 setUserData(data);
-                setCurrentTheme(userTheme); // Carrega o tema do Firebase
+                setCurrentTheme(userTheme);
             } else {
                 // Initialize new user data
                 const newUserData = {
@@ -99,15 +100,14 @@ const App = () => {
         if (!user) return;
         
         try {
-            // *** CORREÇÃO TEMA/SINCRONIZAÇÃO ***
-            // Troca o .update() por .set({ merge: true })
-            // Isso é mais robusto, assim como a página de login
+            // *** CORREÇÃO SINCRONIZAÇÃO DE TEMA ***
+            // Usa .set({ merge: true }) para garantir que os dados
+            // sejam salvos de forma robusta, assim como na tela de login.
             await db.collection('users').doc(user.uid).set({
                 ...data,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true }); // <-- Garante que vai criar ou atualizar, nunca falhar
+            }, { merge: true });
             
-            // Atualiza o estado local com os novos dados
             setUserData(prev => ({ ...prev, ...data }));
         } catch (error) {
             console.error('Error saving data:', error);
@@ -127,15 +127,15 @@ const App = () => {
     // Change theme
     const changeTheme = async (themeName) => {
         setCurrentTheme(themeName);
-        // Salva o tema no Firebase. Agora usa a função robusta.
         await saveUserData({ theme: themeName });
         setShowMenu(false);
     };
 
     // Start Lektion
     const startLektion = (lektionId) => {
-        // Guarda de segurança: não faz nada se os dados do usuário
-        // ainda não foram carregados (evita crash)
+        // *** CORREÇÃO LIÇÃO NÃO ABRE ***
+        // Garante que os dados do usuário (userData) existam
+        // antes de tentar abrir a lição.
         if (!userData) {
             console.warn("User data not loaded yet, please wait.");
             return;
@@ -147,7 +147,6 @@ const App = () => {
             
             let startIndex = 0;
             if (!isReview) {
-                // Continua de onde parou
                 const savedIndex = userData.currentLektionProgress?.[lektionId];
                 if (savedIndex && savedIndex < lektion.exercises.length) {
                     startIndex = savedIndex;
@@ -188,7 +187,7 @@ const App = () => {
 
         if (isCorrect) {
             const newScore = (userData?.score || 0) + 10;
-            saveUserData({ score: newScore }); // Salva apenas a pontuação
+            saveUserData({ score: newScore });
         }
     };
 
@@ -197,7 +196,6 @@ const App = () => {
         const nextIndex = currentExerciseIndex + 1;
         
         if (nextIndex < currentLektion.exercises.length) {
-            // Se a lição NÃO terminou, salva o progresso e avança
             setCurrentExerciseIndex(nextIndex);
             setUserAnswer('');
             setFeedback(null);
@@ -206,7 +204,6 @@ const App = () => {
             await saveUserData({ currentLektionProgress: newProgress });
 
         } else {
-            // Se a lição TERMINOU, chama finishLektion
             await finishLektion();
         }
     };
@@ -221,7 +218,7 @@ const App = () => {
         }
         
         const newProgress = { ...(userData.currentLektionProgress || {}) };
-        delete newProgress[currentLektion.id]; // Remove dos "em progresso"
+        delete newProgress[currentLektion.id];
         
         await saveUserData({ 
             completedLektions: completedLektions,
