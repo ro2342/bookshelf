@@ -1,138 +1,97 @@
-// auth.js - Lógica de login para deutsch/index.html
-// Refatorado para usar a sintaxe de MÓDULO (import), igual ao 'booktracker/auth.js'
+// auth.js - Lida com a autenticação e redirecionamento
+// Inspirado no auth.js do BookTracker
 
-// --- 1. IMPORTAÇÕES (A "TECNOLOGIA DO BOOKTRACKER") ---
-// ATUALIZADO para a versão 12.5.0 e importações corretas, conforme sua sugestão.
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
-// O import de getAnalytics foi omitido por não ser usado nesta página específica.
+// Importações do Firebase (SDK 9 modular)
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
+import { getFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 
-// --- 2. CONFIGURAÇÃO (CONFORME SUA SUGESTÃO) ---
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+console.log("auth.js: Script carregado.");
+
+// SUA Configuração do Firebase (para deutsch-39779)
 const firebaseConfig = {
-  apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
-  authDomain: "deutsch-39779.firebaseapp.com",
-  projectId: "deutsch-39779",
-  storageBucket: "deutsch-39779.firebasestorage.app",
-  messagingSenderId: "672743327567",
-  appId: "1:672743327567:web:8875f89b1f282b7aba273a",
-  measurementId: "G-XYVLCZD740"
+    apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
+    authDomain: "deutsch-39779.firebaseapp.com",
+    projectId: "deutsch-39779",
+    storageBucket: "deutsch-39779.firebasestorage.app",
+    messagingSenderId: "672743327567",
+    appId: "1:672743327567:web:8875f89b1f282b7aba273a",
+    measurementId: "G-XYVLCZD740"
 };
 
-// --- 3. INICIALIZAÇÃO MODULAR (O NOVO PADRÃO) ---
-// Initialize Firebase
+// Inicializa Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+console.log("auth.js: Serviços do Firebase (Deutsch) inicializados.");
 
-// --- 4. LÓGICA DA PÁGINA (A MESMA DE ANTES, MAS USANDO AS FUNÇÕES NOVAS) ---
-
-let selectedTheme = 'taylorSwift';
-
-function renderThemes() {
-    // Acessa o 'window.themes' carregado pelo script em index.html
-    if (!window.themes) {
-        console.error("themes.js não foi carregado a tempo.");
-        return;
-    }
-    const grid = document.getElementById('themeGrid');
-    if (!grid) return; // Sai se o elemento não existir
+// Mostra erro de login na UI
+function showLoginError(error) {
+    const loginContainer = document.getElementById('login-container');
+    // Remove erro antigo se existir
+    const oldError = loginContainer.querySelector('.error-message');
+    if (oldError) oldError.remove();
     
-    grid.innerHTML = ''; // Limpa o grid para evitar duplicatas
-    
-    Object.keys(window.themes).forEach(themeName => {
-        const theme = window.themes[themeName];
-        const div = document.createElement('div');
-        div.className = 'theme-option';
-        if (themeName === selectedTheme) {
-            div.classList.add('selected');
-        }
-        div.textContent = theme.name;
-        div.style.backgroundColor = theme.primary;
-        div.style.color = theme.text;
-        div.style.borderColor = theme.primary;
-        
-        div.onclick = () => {
-            selectedTheme = themeName;
-            document.querySelectorAll('.theme-option').forEach(el => {
-                el.classList.remove('selected');
-            });
-            div.classList.add('selected');
-        };
-        
-        grid.appendChild(div);
-    });
+    loginContainer.innerHTML += `<p class="text-red-400 mt-4 error-message">Erro no login: ${error.message}.</p>`;
+    console.error("auth.js: Erro de login:", error);
 }
 
-const loginBtn = document.getElementById('loginBtn');
-const loadingDiv = document.getElementById('loading');
-
-if (loginBtn) {
-    // Usando as funções modulares importadas (signInWithPopup, GoogleAuthProvider)
-    loginBtn.addEventListener('click', async () => {
-        if(loadingDiv) loadingDiv.style.display = 'block';
-        if(loginBtn) loginBtn.style.display = 'none'; // Esconde o botão ao clicar
-        
-        try {
-            const provider = new GoogleAuthProvider();
-            const result = await signInWithPopup(auth, provider);
-            const user = result.user;
-
-            // Usando as funções modulares (doc, getDoc, setDoc, updateDoc, serverTimestamp)
-            const docRef = doc(db, 'users', user.uid);
-            const docSnap = await getDoc(docRef);
-
-            if (!docSnap.exists()) {
-                await setDoc(docRef, {
-                    email: user.email,
-                    displayName: user.displayName,
-                    theme: selectedTheme,
-                    lastLogin: serverTimestamp(),
-                    score: 0,
-                    completedLektions: [],
-                    lektionProgress: {},
-                    exerciseStats: {}
-                });
-            } else {
-                await updateDoc(docRef, {
-                    lastLogin: serverTimestamp()
-                });
-            }
-            
-            localStorage.setItem('selectedTheme', selectedTheme);
-            window.location.href = 'app.html';
-            
-        } catch (error) {
-            console.error('Login error:', error);
-            alert('Erro ao fazer login. Tente novamente.');
-            if(loadingDiv) loadingDiv.style.display = 'none';
-            if(loginBtn) loginBtn.style.display = 'flex'; // Mostra o botão de volta se der erro
-        }
-    });
-}
-
-// Usando a função modular importada (onAuthStateChanged)
-onAuthStateChanged(auth, (user) => {
-    if (user) {
-        window.location.href = 'app.html';
-    } else {
-        // --- CORREÇÃO: MOSTRA O BOTÃO SE O USUÁRIO NÃO ESTIVER LOGADO ---
-        if(loadingDiv) loadingDiv.style.display = 'none';
-        if(loginBtn) loginBtn.style.display = 'flex'; // 'flex' pois o botão usa display: flex
-    }
-});
-
-// Inicializa a renderização dos temas
-// Adiciona um listener para garantir que o DOM (e o themes.js) esteja pronto
+// Event listener para quando o DOM estiver pronto
 document.addEventListener('DOMContentLoaded', () => {
-     renderThemes();
-});
+    console.log("auth.js: DOM pronto.");
+    const googleLoginBtn = document.getElementById('google-login-btn');
+    const loader = document.getElementById('loader');
 
-// Se o DOM já estiver pronto (caso o script carregue 'defer'),
-// rode a função imediatamente.
-if (document.readyState === 'interactive' || document.readyState === 'complete') {
-    renderThemes();
-}
+    if (googleLoginBtn) {
+        // Evento de clique no botão de login
+        googleLoginBtn.addEventListener('click', async () => {
+            console.log("auth.js: Botão de login clicado.");
+            loader.classList.remove('hidden');
+            googleLoginBtn.classList.add('hidden');
+
+            const provider = new GoogleAuthProvider();
+            try {
+                console.log("auth.js: Tentando abrir o pop-up de login...");
+                const result = await signInWithPopup(auth, provider);
+                const user = result.user;
+                console.log("auth.js: Login com Google bem-sucedido.");
+                
+                // Cria ou atualiza o perfil do usuário no Firestore
+                // Este é o local ideal para garantir que o usuário tenha um perfil
+                const userDocRef = doc(db, "users", user.uid, "profile", "data");
+                await setDoc(userDocRef, {
+                    uid: user.uid,
+                    name: user.displayName,
+                    email: user.email,
+                    avatarUrl: user.photoURL,
+                    lastLogin: serverTimestamp(),
+                }, { merge: true }); // Merge: true para não sobrescrever dados existentes (como score)
+
+                // onAuthStateChanged irá tratar do redirecionamento
+            } catch (error) {
+                console.error("auth.js: ERRO durante signInWithPopup:", error);
+                loader.classList.add('hidden');
+                googleLoginBtn.classList.remove('hidden');
+                showLoginError(error);
+            }
+        });
+    }
+
+    // Observador do estado de autenticação
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            console.log("auth.js: Usuário autenticado detectado:", user.uid);
+            // Guarda o ID de usuário no localStorage para o app.js pegar
+            localStorage.setItem('deutschAppUserId', user.uid);
+            console.log("auth.js: ID do usuário salvo. Redirecionando para app.html...");
+            window.location.href = 'app.html';
+        } else {
+            console.log("auth.js: Nenhum usuário autenticado.");
+            loader.classList.add('hidden');
+            if (googleLoginBtn) {
+                googleLoginBtn.classList.remove('hidden');
+            }
+        }
+    });
+});
 
