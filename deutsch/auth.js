@@ -12,13 +12,13 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp } from "h
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-    apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
-    authDomain: "deutsch-39779.firebaseapp.com",
-    projectId: "deutsch-39779",
-    storageBucket: "deutsch-39779.firebasestorage.app",
-    messagingSenderId: "672743327567",
-    appId: "1:672743327567:web:8875f89b1f282b7aba273a",
-    measurementId: "G-XYVLCZD740"
+  apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
+  authDomain: "deutsch-39779.firebaseapp.com",
+  projectId: "deutsch-39779",
+  storageBucket: "deutsch-39779.firebasestorage.app",
+  messagingSenderId: "672743327567",
+  appId: "1:672743327567:web:8875f89b1f282b7aba273a",
+  measurementId: "G-XYVLCZD740"
 };
 
 // --- 3. INICIALIZAÇÃO MODULAR (O NOVO PADRÃO) ---
@@ -73,6 +73,7 @@ if (loginBtn) {
     // Usando as funções modulares importadas (signInWithPopup, GoogleAuthProvider)
     loginBtn.addEventListener('click', async () => {
         if(loadingDiv) loadingDiv.style.display = 'block';
+        if(loginBtn) loginBtn.style.display = 'none'; // Esconde o botão ao clicar
         
         try {
             const provider = new GoogleAuthProvider();
@@ -107,6 +108,7 @@ if (loginBtn) {
             console.error('Login error:', error);
             alert('Erro ao fazer login. Tente novamente.');
             if(loadingDiv) loadingDiv.style.display = 'none';
+            if(loginBtn) loginBtn.style.display = 'flex'; // Mostra o botão de volta se der erro
         }
     });
 }
@@ -115,6 +117,10 @@ if (loginBtn) {
 onAuthStateChanged(auth, (user) => {
     if (user) {
         window.location.href = 'app.html';
+    } else {
+        // --- CORREÇÃO: MOSTRA O BOTÃO SE O USUÁRIO NÃO ESTIVER LOGADO ---
+        if(loadingDiv) loadingDiv.style.display = 'none';
+        if(loginBtn) loginBtn.style.display = 'flex'; // 'flex' pois o botão usa display: flex
     }
 });
 
