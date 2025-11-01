@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>The Deutsch App!!!!!</title>
+    <title>Deutsch A1.1 - Login</title>
     <style>
         * {
             margin: 0;
@@ -150,18 +150,104 @@
         </div>
     </div>
 
-    <!-- === MUDANÇA CRÍTICA DE SDK (COMO O BOOKTRACKER) === -->
-    
-    <!-- 1. Carregamos os temas (necessário pois 'themes.js' não é um módulo) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
     <script src="themes.js"></script>
 
-    <!-- 2. Carregamos o NOVO auth.js como um MÓDULO, igual ao booktracker -->
-    <!-- Ele agora importará o Firebase sozinho -->
-    <script type="module" src="auth.js"></script>
-    
-    <!-- 3. Removemos os scripts antigos do SDK e o script inline -->
-    <!-- === FIM DA MUDANÇA === -->
-    
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
+            authDomain: "deutsch-39779.firebaseapp.com",
+            projectId: "deutsch-39779",
+            storageBucket: "deutsch-39779.firebasestorage.app",
+            messagingSenderId: "672743327567",
+            appId: "1:672743327567:web:8875f89b1f282b7aba273a",
+            measurementId: "G-XYVLCZD740"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+
+        // Selected theme
+        let selectedTheme = 'taylorSwift';
+
+        // Render theme grid
+        function renderThemes() {
+            const grid = document.getElementById('themeGrid');
+            Object.keys(window.themes).forEach(themeName => {
+                const theme = window.themes[themeName];
+                const div = document.createElement('div');
+                div.className = 'theme-option';
+                if (themeName === selectedTheme) {
+                    div.classList.add('selected');
+                }
+                div.textContent = theme.name;
+                div.style.backgroundColor = theme.primary;
+                div.style.color = theme.text;
+                div.style.borderColor = theme.primary;
+                
+                div.onclick = () => {
+                    selectedTheme = themeName;
+                    document.querySelectorAll('.theme-option').forEach(el => {
+                        el.classList.remove('selected');
+                    });
+                    div.classList.add('selected');
+                };
+                
+                grid.appendChild(div);
+            });
+        }
+
+        // Google Sign In
+        document.getElementById('loginBtn').addEventListener('click', async () => {
+            const loading = document.getElementById('loading');
+            loading.style.display = 'block';
+            
+            try {
+                const provider = new firebase.auth.GoogleAuthProvider();
+                const result = await auth.signInWithPopup(provider);
+                const user = result.user;
+
+                // --- INÍCIO DA MODIFICAÇÃO ---
+
+                // ANTES (Causava a race condition):
+                /* await db.collection('users').doc(user.uid).set({
+                    email: user.email,
+                    displayName: user.displayName,
+                    theme: selectedTheme,
+                    lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                */
+
+                // DEPOIS (Corrigido):
+                // Apenas salve o tema no localStorage. O app.js cuidará de criar o usuário no DB.
+                localStorage.setItem('selectedTheme', selectedTheme);
+
+                // --- FIM DA MODIFICAÇÃO ---
+
+                // Redirect to app
+                window.location.href = 'app.html';
+            } catch (error) {
+                console.error('Login error:', error);
+                alert('Erro ao fazer login. Tente novamente.');
+                loading.style.display = 'none';
+            }
+        });
+
+        // Check if user is already logged in
+        auth.onAuthStateChanged((user) => {
+            if (user) {
+                window.location.href = 'app.html';
+            }
+        });
+
+        // Initialize
+        renderThemes();
+    </script>
 </body>
 </html>
-
