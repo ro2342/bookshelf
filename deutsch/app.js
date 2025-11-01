@@ -2,14 +2,15 @@
 
 // Firebase Configuration
 const firebaseConfig = {
-    apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaBiatLUcXU",
-    authDomain: "deutsch-39779.firebaseapp.com",
-    projectId: "deutsch-39779",
-    storageBucket: "deutsch-39779.firebasestorage.app",
-    messagingSenderId: "672743327567",
-    appId: "1:672743327567:web:8875f89b1f282b7aba273a",
-    measurementId: "G-XYVLCZD740"
+  apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
+  authDomain: "deutsch-39779.firebaseapp.com",
+  projectId: "deutsch-39779",
+  storageBucket: "deutsch-39779.firebasestorage.app",
+  messagingSenderId: "672743327567",
+  appId: "1:672743327567:web:8875f89b1f282b7aba273a",
+  measurementId: "G-XYVLCZD740"
 };
+
 
 // Initialize Firebase
 if (!firebase.apps.length) {
