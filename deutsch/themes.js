@@ -113,7 +113,7 @@ primary: '#1BAEC6', // Turquesa/Azul-água
     
     midnights: {
         name: 'Midnights',
-        primary: '#191970',
+        primary: '#5656e8',
         bg: '#0f0f1e',
         text: '#e8e8ff',
         card: '#1a1a3e',
@@ -134,7 +134,7 @@ primary: '#1BAEC6', // Turquesa/Azul-água
     showgirl: {
 name: 'TLOAS',
 primary: '#E57118', // Laranja principal (predominante)
-        bg: '#fffaf5',      // Fundo neutro claro (mantido para legibilidade)
+        bg: '#F28C42',      // Fundo neutro claro (mantido para legibilidade)
         text: '#55703E',      // Verde escuro (como sugerido para o texto)
         card: '#FFFFFF',      // Fundo do card branco (para máximo contraste do texto)
         accent: '#61B498',    // O tom de verde/azul (teal)
