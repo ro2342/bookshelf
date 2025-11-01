@@ -32,6 +32,11 @@ const App = () => {
     const [feedback, setFeedback] = React.useState(null);
     const [showGrammar, setShowGrammar] = React.useState(false);
 
+    // --- INÍCIO DAS NOVAS MUDANÇAS ---
+    const [isSaving, setIsSaving] = React.useState(false); // Para feedback no botão
+    const [showFinishModal, setShowFinishModal] = React.useState(false); // Para o modal de "finalizado"
+    // --- FIM DAS NOVAS MUDANÇAS ---
+
     // *** INÍCIO DA CORREÇÃO DE SINCRONIZAÇÃO ***
     // Trocamos o loadUserData por um listener em tempo real (onSnapshot)
     // que é ativado quando o estado de autenticação muda.
@@ -113,7 +118,7 @@ const App = () => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    }, [currentView, showMenu, showGrammar, feedback, loading]); // <-- CORREÇÃO: Adicionado 'loading'
+    }, [currentView, showMenu, showGrammar, feedback, loading, showFinishModal]); // <-- CORREÇÃO: Adicionado 'loading' e 'showFinishModal'
     
     // (A função loadUserData foi removida pois sua lógica agora está no useEffect acima)
 
@@ -222,10 +227,12 @@ const App = () => {
 
     // Finish Lektion
     const finishLektion = async () => {
-        if (!currentLektion || !userData) return;
+        if (!currentLektion || !userData || isSaving) return; // Proteção contra clique duplo
+        
+        setIsSaving(true); // Ativa o estado "Salvando"
         
         const lektionId = currentLektion.id;
-        const completedLektions = userData.completedLektions || [];
+        const completedLektions = [...(userData.completedLektions || [])]; // Cria nova array
         const isNewCompletion = !completedLektions.includes(lektionId);
 
         if (isNewCompletion) {
@@ -234,11 +241,20 @@ const App = () => {
         
         const newProgress = { ...(userData.lektionProgress || {}), [lektionId]: currentLektion.exercises.length };
         
+        // Salva os dados
         await saveUserData({ 
             completedLektions: completedLektions, 
             lektionProgress: newProgress 
         });
         
+        setIsSaving(false); // Desativa o "Salvando"
+        setShowFinishModal(true); // <-- AQUI! Mostra o modal em vez de navegar
+    };
+
+    // --- NOVA FUNÇÃO ---
+    // Chamada pelo botão no novo modal para fechar e navegar
+    const handleCloseFinishModal = () => {
+        setShowFinishModal(false);
         setCurrentLektion(null);
         setCurrentView('map');
     };
@@ -334,6 +350,9 @@ const App = () => {
 
             {/* Grammar Modal */}
             {showGrammar && <GrammarModal />}
+
+            {/* --- NOVO MODAL ADICIONADO --- */}
+            {showFinishModal && <LessonFinishedModal />}
         </div>
     );
 
@@ -719,12 +738,15 @@ const App = () => {
                             <button 
                                 className="btn-primary"
                                 onClick={nextExercise} 
+                                disabled={isSaving} // <-- MUDANÇA: Desativa botão ao salvar
                                 style={{ 
                                     flex: 1,
-                                    background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
+                                    background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`,
+                                    opacity: isSaving ? 0.7 : 1 // <-- MUDANÇA: Feedback visual
                                 }}
                             >
-                                {currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉'}
+                                {/* --- MUDANÇA: Texto do botão --- */}
+                                {isSaving ? 'Salvando...' : (currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉')}
                             </button>
                         )}
                     </div>
@@ -849,6 +871,41 @@ const App = () => {
                         }}
                     >
                         Entendi, fechar
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // --- NOVO COMPONENTE MODAL ---
+    function LessonFinishedModal() {
+        return (
+            <div className="modal-overlay">
+                <div 
+                    className="modal-content" 
+                    style={{ 
+                        backgroundColor: theme.card,
+                        textAlign: 'center',
+                        padding: '40px'
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <div style={{ fontSize: '4rem', marginBottom: 20 }}>✅</div>
+                    <h2 style={{ fontSize: '1.8rem', marginBottom: 20, color: theme.primary }}>
+                        Lição Finalizada!
+                    </h2>
+                    <p style={{ opacity: 0.8, marginBottom: 30, fontSize: '1.1rem' }}>
+                        Ótimo trabalho! Seu progresso foi salvo.
+                    </p>
+                    <button 
+                        className="btn-primary"
+                        onClick={handleCloseFinishModal} // Usa a nova função
+                        style={{ 
+                            width: '100%',
+                            background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
+                        }}
+                    >
+                        Voltar ao Mapa
                     </button>
                 </div>
             </div>
