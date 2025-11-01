@@ -254,6 +254,48 @@ function showLoading(message = 'Carregando...') {
     document.removeEventListener('keydown', handleEscKey);
 }
 
+// Converte o Markdown simples do 'grammarExplanations.js' para HTML
+function parseSimpleMarkdown(text) {
+    if (!text) return '';
+
+    let htmlLines = text.trim().split('\n');
+    let inList = false;
+
+    let processedLines = htmlLines.map(line => {
+        // 1. Converte **bold** para <strong>bold</strong>
+        let processedLine = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+        // 2. Converte • item para <li>item</li>
+        if (processedLine.trim().startsWith('• ')) {
+            let itemContent = processedLine.trim().substring(2).trim();
+            if (!inList) {
+                // Inicia a lista
+                inList = true;
+                return '<ul><li class="mb-1 ml-4 list-disc">' + itemContent + '</li>';
+            } else {
+                // Continua a lista
+                return '<li class="mb-1 ml-4 list-disc">' + itemContent + '</li>';
+            }
+        } else {
+            // Não é um item de lista
+            if (inList) {
+                // Fecha a lista anterior
+                inList = false;
+                return '</ul>' + processedLine; // Adiciona a linha atual após fechar a lista
+            }
+            return processedLine; // Linha normal
+        }
+    });
+
+    // Se a lista ainda estiver aberta no final, fecha ela
+    if (inList) {
+        processedLines.push('</ul>');
+    }
+
+    // Junta as linhas de volta. O 'whitespace-pre-line' cuidará das quebras de linha.
+    return processedLines.join('\n');
+}
+
 // --- ROUTER (Inspirado no BookTracker) ---
 
 // ADICIONADO 'exercise' às páginas
@@ -742,12 +784,22 @@ function showGrammarModal() {
 
     const grammarHtml = currentLektion.grammarKeys.map(key => {
         const explanation = allGrammar[key];
-        return explanation ? `
+        if (!explanation) {
+            return `<p class="text-red-500">Erro: Tópico de gramática "${key}" não encontrado.</p>`;
+        }
+        
+        // *** LINHA MODIFICADA ***
+        // Usa a nova função para "traduzir" o Markdown
+        const parsedContent = parseSimpleMarkdown(explanation.content);
+
+        return `
             <div class="mb-6">
                 <h3 class="text-xl font-bold mb-3" style="color: var(--accent);">${explanation.title}</h3>
-                <div class="text-gray-300 whitespace-pre-line leading-relaxed break-words">${explanation.content}</div>
+                <div class="text-gray-300 whitespace-pre-line leading-relaxed break-words">
+                    ${parsedContent}
+                </div>
             </div>
-        ` : `<p class="text-red-500">Erro: Tópico de gramática "${key}" não encontrado.</p>`;
+        `;
     }).join('');
     
     showModal("Explicações Gramaticais 📚", grammarHtml, '900px');
