@@ -22,13 +22,12 @@ window.themes = {
     },
     
     taylorSwift: {
-        name: 'Taylor Swift',
-        primary: '#083116',
-        bg: '#106836',
-        text: '#2d2d2d',
-        card: '#f5f0e8',
-        accent: '#c9a961',
-        border: '#e8dcc8'
+primary: '#1BAEC6', // Turquesa/Azul-água
+        bg: '#E7DBCC',      // Bege claro
+        text: '#1D4737',      // Verde/Azul escuro (para texto)
+        card: '#f5f5f5',      // Um branco leve para card
+        accent: '#81A757',    // Verde claro
+        border: '#D4C8BC'     // Borda em tom de bege
     },
     
     fearless: {
@@ -132,9 +131,9 @@ window.themes = {
     },
     
     showgirl: {
-        name: 'TLOAS',
-        primary: '#ff6b35',
-        bg: '#fffaf5',
+name: 'TLOAS',
+        primary: '#fffaf5',  // Cor clara (antigo fundo)
+        bg: '#ff6b35',      // Fundo laranja (antiga primária)
         text: '#2d1f1a',
         card: '#fff0e6',
         accent: '#00b894',
