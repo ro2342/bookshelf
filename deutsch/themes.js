@@ -22,6 +22,7 @@ window.themes = {
     },
     
     taylorSwift: {
+     name: 'Debut',
 primary: '#1BAEC6', // Turquesa/Azul-água
         bg: '#E7DBCC',      // Bege claro
         text: '#1D4737',      // Verde/Azul escuro (para texto)
