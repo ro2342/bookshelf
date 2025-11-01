@@ -1,6 +1,10 @@
-// app.js - Aplicativo React Completo
+// app.js - Aplicativo React com Firebase v9+ (Modular)
 
-// Firebase Configuration
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
+import { getAuth, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
+
+// --- CONFIGURAÇÃO FIREBASE ---
 const firebaseConfig = {
     apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
     authDomain: "deutsch-39779.firebaseapp.com",
@@ -11,150 +15,153 @@ const firebaseConfig = {
     measurementId: "G-XYVLCZD740"
 };
 
-// Initialize Firebase
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
-const auth = firebase.auth();
-const db = firebase.firestore();
+let app, db, auth;
+let userId = null;
+let userDataUnsubscribe = null;
+let userData = {
+    score: 0,
+    completedLektions: [],
+    theme: 'taylorSwift',
+    exerciseProgress: {}, // { lektionId: { completed: [], currentIndex: 0 } }
+    lastUpdated: null
+};
 
-// Main App Component
+// --- COMPONENTE PRINCIPAL ---
 const App = () => {
     const [user, setUser] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
-    const [userData, setUserData] = React.useState(null);
     const [currentView, setCurrentView] = React.useState('home');
     const [currentTheme, setCurrentTheme] = React.useState('taylorSwift');
-    const [showMenu, setShowMenu] = React.useState(false);
     const [currentLektion, setCurrentLektion] = React.useState(null);
     const [currentExerciseIndex, setCurrentExerciseIndex] = React.useState(0);
     const [userAnswer, setUserAnswer] = React.useState('');
     const [feedback, setFeedback] = React.useState(null);
     const [showGrammar, setShowGrammar] = React.useState(false);
+    const [showMenu, setShowMenu] = React.useState(false);
+    const [userScore, setUserScore] = React.useState(0);
+    const [completedLektions, setCompletedLektions] = React.useState([]);
 
-    // Check authentication
+    // Inicializar Firebase e Auth
     React.useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged(async (user) => {
-            if (user) {
-                setUser(user);
-                await loadUserData(user.uid); // Esta função foi modificada
-            } else {
-                window.location.href = 'index.html';
-            }
-            setLoading(false);
-        });
+        try {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
 
-        return () => unsubscribe();
+            onAuthStateChanged(auth, async (firebaseUser) => {
+                if (firebaseUser) {
+                    userId = firebaseUser.uid;
+                    setUser(firebaseUser);
+                    await initializeUserData();
+                } else {
+                    window.location.href = 'index.html';
+                }
+            });
+        } catch (error) {
+            console.error("Erro ao inicializar Firebase:", error);
+            alert("Erro crítico ao inicializar o aplicativo.");
+        }
     }, []);
 
-    // Initialize Lucide icons only once
-    React.useEffect(() => {
-        if (window.lucide) {
-            window.lucide.createIcons();
-        }
-    }, [currentView]); // Only re-run when view changes
+    // Inicializar dados do usuário e listener em tempo real
+    const initializeUserData = async () => {
+        if (!userId) return;
 
-    
-    // --- INÍCIO DA MODIFICAÇÃO ---
+        const userDocRef = doc(db, "users", userId);
 
-    // Load user data from Firestore
-    const loadUserData = async (uid) => {
-        try {
-            const docRef = db.collection('users').doc(uid);
-            const doc = await docRef.get();
-
-            // Pega o tema que o usuário selecionou na página de login
-            const loginTheme = localStorage.getItem('selectedTheme') || 'taylorSwift';
-            // Pega informações do usuário logado (nome, etc)
-            const currentUser = auth.currentUser;
-            
-            if (doc.exists) {
-                // O usuário já existe, apenas carregue os dados
-                const data = doc.data();
-                setUserData(data);
-                // Usa o tema salvo na nuvem, ou o tema do login se for a primeira vez
-                setCurrentTheme(data.theme || loginTheme); 
+        // Listener em tempo real
+        if (userDataUnsubscribe) userDataUnsubscribe();
+        
+        userDataUnsubscribe = onSnapshot(userDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                userData = {
+                    score: data.score || 0,
+                    completedLektions: data.completedLektions || [],
+                    theme: data.theme || 'taylorSwift',
+                    exerciseProgress: data.exerciseProgress || {},
+                    lastUpdated: data.lastUpdated
+                };
+                
+                setUserScore(userData.score);
+                setCompletedLektions(userData.completedLektions);
+                setCurrentTheme(userData.theme);
+                applyTheme(userData.theme);
             } else {
-                // O usuário NÃO existe, crie o documento pela primeira vez
-                const newUserData = {
+                // Criar documento inicial
+                const initialData = {
                     score: 0,
                     completedLektions: [],
-                    theme: loginTheme, // Usa o tema da página de login
-                    exerciseStats: {},
-                    // Adiciona informações do perfil automaticamente
-                    displayName: currentUser ? currentUser.displayName : 'Estudante',
-                    email: currentUser ? currentUser.email : '',
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                    theme: 'taylorSwift',
+                    exerciseProgress: {},
+                    lastUpdated: new Date()
                 };
-                await docRef.set(newUserData); // Cria o documento
-                setUserData(newUserData); // Salva no estado do React
-                setCurrentTheme(loginTheme);
-                
-                // Limpa o localStorage, pois o tema já está salvo na nuvem
-                localStorage.removeItem('selectedTheme');
+                setDoc(userDocRef, initialData);
+                userData = initialData;
             }
-        } catch (error) {
-            console.error('Error loading user data:', error);
-        }
+            setLoading(false);
+        }, (error) => {
+            console.error("Erro ao ouvir dados do usuário:", error);
+            setLoading(false);
+        });
     };
 
-    // --- FIM DA MODIFICAÇÃO ---
+    // Salvar dados no Firestore
+    const saveUserData = async (updates) => {
+        if (!userId) return;
 
-
-    // Save user data to Firestore
-    const saveUserData = async (data) => {
-        if (!user) return;
-        
         try {
-            await db.collection('users').doc(user.uid).update({
-                ...data,
-                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            setUserData(prev => ({ ...prev, ...data }));
+            const userDocRef = doc(db, "users", userId);
+            await setDoc(userDocRef, {
+                ...updates,
+                lastUpdated: new Date()
+            }, { merge: true });
         } catch (error) {
-            console.error('Error saving data:', error);
+            console.error("Erro ao salvar dados:", error);
         }
     };
 
-    // Logout
-    const handleLogout = async () => {
-        try {
-            await auth.signOut();
-            window.location.href = 'index.html';
-        } catch (error) {
-            console.error('Logout error:', error);
+    // Aplicar tema
+    const applyTheme = (themeName) => {
+        const theme = window.themes[themeName];
+        if (!theme) return;
+
+        for (const [key, value] of Object.entries(theme.values)) {
+            const prop = `--md-sys-color-${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
+            document.documentElement.style.setProperty(prop, value);
         }
     };
 
-    // Change theme
+    // Trocar tema
     const changeTheme = async (themeName) => {
         setCurrentTheme(themeName);
+        applyTheme(themeName);
         await saveUserData({ theme: themeName });
-        setShowMenu(false);
     };
 
-    // Start Lektion
+    // Iniciar lição
     const startLektion = (lektionId) => {
         const lektion = window.exercisesData.find(l => l.id === lektionId);
-        if (lektion) {
-            setCurrentLektion(lektion);
-            setCurrentExerciseIndex(0);
-            setUserAnswer('');
-            setFeedback(null);
-            setCurrentView('exercise');
-        }
+        if (!lektion) return;
+
+        const progress = userData.exerciseProgress[lektionId] || { completed: [], currentIndex: 0 };
+        
+        setCurrentLektion(lektion);
+        setCurrentExerciseIndex(progress.currentIndex);
+        setUserAnswer('');
+        setFeedback(null);
+        setCurrentView('exercise');
     };
 
-    // Check answer
-    const checkAnswer = () => {
+    // Verificar resposta
+    const checkAnswer = async () => {
         if (!currentLektion) return;
-        
+
         const exercise = currentLektion.exercises[currentExerciseIndex];
         const userAns = userAnswer.trim().toLowerCase();
         const correctAns = exercise.answer.toLowerCase();
         const alternatives = exercise.alternatives || [];
-        
-        // Handle multi-part answers (e.g., "fährt|ab")
+
         const correctAnswers = [correctAns, ...alternatives.map(a => a.toLowerCase())];
         const isCorrect = correctAnswers.some(ans => {
             if (ans.includes('|')) {
@@ -171,42 +178,89 @@ const App = () => {
         });
 
         if (isCorrect) {
-            // Add points
-            const newScore = (userData?.score || 0) + 10;
-            saveUserData({ score: newScore });
+            const lektionId = currentLektion.id;
+            const progress = userData.exerciseProgress[lektionId] || { completed: [], currentIndex: 0 };
+            
+            // Adicionar exercício completado se ainda não foi
+            if (!progress.completed.includes(currentExerciseIndex)) {
+                progress.completed.push(currentExerciseIndex);
+                
+                // Adicionar 10 pontos apenas uma vez por exercício
+                const newScore = userData.score + 10;
+                
+                // Salvar progresso imediatamente
+                await saveUserData({
+                    score: newScore,
+                    [`exerciseProgress.${lektionId}`]: progress
+                });
+            }
         }
     };
 
-    // Next exercise
-    const nextExercise = () => {
+    // Próximo exercício
+    const nextExercise = async () => {
+        if (!currentLektion) return;
+
         if (currentExerciseIndex < currentLektion.exercises.length - 1) {
-            setCurrentExerciseIndex(currentExerciseIndex + 1);
+            const nextIndex = currentExerciseIndex + 1;
+            setCurrentExerciseIndex(nextIndex);
             setUserAnswer('');
             setFeedback(null);
+
+            // Atualizar índice atual no Firebase
+            const lektionId = currentLektion.id;
+            const progress = userData.exerciseProgress[lektionId] || { completed: [], currentIndex: 0 };
+            progress.currentIndex = nextIndex;
+
+            await saveUserData({
+                [`exerciseProgress.${lektionId}`]: progress
+            });
         } else {
-            finishLektion();
+            await finishLektion();
         }
     };
 
-// Finish Lektion
+    // Finalizar lição
     const finishLektion = async () => {
-        if (!currentLektion || !userData) return;
+        if (!currentLektion) return;
+
+        const lektionId = currentLektion.id;
+        const newCompletedLektions = [...userData.completedLektions];
         
-        const completedLektions = userData.completedLektions || [];
-        if (!completedLektions.includes(currentLektion.id)) {
-            
-            // CORREÇÃO: Criamos um novo array usando 'spread syntax' (...)
-            const newCompletedLektions = [...completedLektions, currentLektion.id];
-            
-            // Passamos o novo array para ser salvo
-            await saveUserData({ completedLektions: newCompletedLektions });
+        if (!newCompletedLektions.includes(lektionId)) {
+            newCompletedLektions.push(lektionId);
         }
-        
+
+        // Resetar progresso da lição
+        const progress = { completed: [], currentIndex: 0 };
+
+        await saveUserData({
+            completedLektions: newCompletedLektions,
+            [`exerciseProgress.${lektionId}`]: progress
+        });
+
         setCurrentLektion(null);
         setCurrentView('map');
     };
 
-    // Get theme colors
+    // Logout
+    const handleLogout = async () => {
+        try {
+            if (userDataUnsubscribe) userDataUnsubscribe();
+            await signOut(auth);
+            window.location.href = 'index.html';
+        } catch (error) {
+            console.error('Erro ao fazer logout:', error);
+        }
+    };
+
+    // Inicializar ícones Lucide quando a view mudar
+    React.useEffect(() => {
+        if (window.lucide && !loading) {
+            setTimeout(() => window.lucide.createIcons(), 100);
+        }
+    }, [currentView, loading]);
+
     const theme = window.themes[currentTheme] || window.themes.taylorSwift;
 
     if (loading) {
@@ -216,11 +270,12 @@ const App = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 minHeight: '100vh',
-                backgroundColor: theme.bg
+                backgroundColor: theme.bg,
+                color: theme.text
             }}>
                 <div style={{ textAlign: 'center' }}>
-                    <div className="loading" style={{ fontSize: '3rem' }}>⏳</div>
-                    <p style={{ marginTop: 20, color: theme.text }}>Carregando...</p>
+                    <div style={{ fontSize: '3rem', animation: 'spin 1s linear infinite' }}>⏳</div>
+                    <p style={{ marginTop: 20 }}>Carregando...</p>
                 </div>
             </div>
         );
@@ -244,7 +299,7 @@ const App = () => {
                 <div className="header-left">
                     <div className="score-display" style={{ color: theme.primary }}>
                         <span>🏆</span>
-                        <span>{userData?.score || 0}</span>
+                        <span>{userScore}</span>
                     </div>
                 </div>
                 <button 
@@ -303,17 +358,14 @@ const App = () => {
     // HOME VIEW
     function HomeView() {
         const totalLektions = window.exercisesData.length;
-        const completedCount = userData?.completedLektions?.length || 0;
+        const completedCount = completedLektions.length;
         const progress = (completedCount / totalLektions) * 100;
 
         return (
             <div>
                 <div className="card" style={{ backgroundColor: theme.card }}>
                     <h1 style={{ fontSize: '2rem', marginBottom: 15, color: theme.primary }}>
-                        {/* MODIFICADO: Puxa o 'displayName' dos dados do usuário (userData) 
-                          ao invés de 'user' (que é só do auth).
-                        */}
-                        Olá, {userData?.displayName?.split(' ')[0] || 'Estudante'}! 👋
+                        Olá, {user?.displayName?.split(' ')[0] || 'Estudante'}! 👋
                     </h1>
                     <p style={{ fontSize: '1.1rem', opacity: 0.8 }}>
                         Bem-vindo ao seu curso de alemão A1.1
@@ -359,8 +411,6 @@ const App = () => {
 
     // MAP VIEW
     function MapView() {
-        const completedLektions = userData?.completedLektions || [];
-        
         return (
             <div>
                 <h1 style={{ fontSize: '2rem', marginBottom: 20, color: theme.primary }}>
@@ -370,6 +420,8 @@ const App = () => {
                 {window.exercisesData.map((lektion, index) => {
                     const isCompleted = completedLektions.includes(lektion.id);
                     const isLocked = index > 0 && !completedLektions.includes(window.exercisesData[index - 1].id);
+                    const progress = userData.exerciseProgress[lektion.id];
+                    const hasProgress = progress && progress.completed.length > 0;
                     
                     return (
                         <div 
@@ -388,10 +440,22 @@ const App = () => {
                             <p style={{ marginBottom: 15, opacity: 0.8 }}>
                                 <strong>Tópicos:</strong> {lektion.topics.join(', ')}
                             </p>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 15 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 15, flexWrap: 'wrap' }}>
                                 <span style={{ opacity: 0.7 }}>
                                     📝 {lektion.exercises.length} exercícios
                                 </span>
+                                {hasProgress && !isCompleted && (
+                                    <span style={{ 
+                                        backgroundColor: theme.accent, 
+                                        color: 'white', 
+                                        padding: '4px 12px', 
+                                        borderRadius: 12,
+                                        fontSize: '0.85rem',
+                                        fontWeight: 600
+                                    }}>
+                                        {progress.completed.length}/{lektion.exercises.length} completos
+                                    </span>
+                                )}
                                 {!isLocked && (
                                     <button 
                                         className="btn-secondary"
@@ -401,7 +465,7 @@ const App = () => {
                                             color: theme.text
                                         }}
                                     >
-                                        {isCompleted ? 'Revisar' : 'Iniciar'}
+                                        {isCompleted ? 'Revisar' : hasProgress ? 'Continuar' : 'Iniciar'}
                                     </button>
                                 )}
                             </div>
@@ -415,7 +479,7 @@ const App = () => {
     // PROGRESS VIEW
     function ProgressView() {
         const totalLektions = window.exercisesData.length;
-        const completedCount = userData?.completedLektions?.length || 0;
+        const completedCount = completedLektions.length;
         const totalExercises = window.exercisesData.reduce((sum, l) => sum + l.exercises.length, 0);
         const progress = (completedCount / totalLektions) * 100;
 
@@ -428,7 +492,7 @@ const App = () => {
                 <div className="stats-grid">
                     <div className="card stat-card" style={{ backgroundColor: theme.card }}>
                         <div className="stat-number" style={{ color: theme.primary }}>
-                            {userData?.score || 0}
+                            {userScore}
                         </div>
                         <div className="stat-label">Pontos Totais</div>
                     </div>
@@ -457,8 +521,8 @@ const App = () => {
 
                 <div className="card" style={{ backgroundColor: theme.card }}>
                     <h2 style={{ fontSize: '1.5rem', marginBottom: 15 }}>Lições Completadas</h2>
-                    {userData?.completedLektions?.length > 0 ? (
-                        userData.completedLektions.map(lektionId => {
+                    {completedLektions.length > 0 ? (
+                        completedLektions.map(lektionId => {
                             const lektion = window.exercisesData.find(l => l.id === lektionId);
                             return lektion ? (
                                 <div 
@@ -503,13 +567,13 @@ const App = () => {
 
         const exercise = currentLektion.exercises[currentExerciseIndex];
         const progress = ((currentExerciseIndex + 1) / currentLektion.exercises.length) * 100;
+        const isLastExercise = currentExerciseIndex === currentLektion.exercises.length - 1;
 
-        // Auto-focus input when exercise changes
         React.useEffect(() => {
             if (inputRef.current && !feedback) {
                 inputRef.current.focus();
             }
-        }, [currentExerciseIndex]);
+        }, [currentExerciseIndex, feedback]);
 
         return (
             <div>
@@ -617,14 +681,14 @@ const App = () => {
                             {feedback.isCorrect ? '✓' : '✗'}
                             <div>
                                 <div style={{ fontWeight: 700, marginBottom: 5 }}>
-                                    {feedback.isCorrect ? 'Correto!' : 'Incorreto'}
+                                    {feedback.isCorrect ? 'Correto! +10 pontos' : 'Incorreto'}
                                 </div>
                                 <div>{feedback.explanation}</div>
                             </div>
                         </div>
                     )}
 
-                    <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
                         {!feedback ? (
                             <>
                                 <button 
@@ -648,16 +712,31 @@ const App = () => {
                                 </button>
                             </>
                         ) : (
-                            <button 
-                                className="btn-primary"
-                                onClick={nextExercise}
-                                style={{ 
-                                    flex: 1,
-                                    background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
-                                }}
-                            >
-                                {currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉'}
-                            </button>
+                            <>
+                                <button 
+                                    className="btn-primary"
+                                    onClick={nextExercise}
+                                    style={{ 
+                                        flex: 1,
+                                        background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
+                                    }}
+                                >
+                                    {isLastExercise ? 'Finalizar Lição 🎉' : 'Próximo →'}
+                                </button>
+                                {isLastExercise && (
+                                    <button 
+                                        className="btn-secondary"
+                                        onClick={async () => {
+                                            await finishLektion();
+                                            const nextLektion = window.exercisesData.find(l => l.id === currentLektion.id + 1);
+                                            if (nextLektion) startLektion(nextLektion.id);
+                                        }}
+                                        style={{ borderColor: theme.accent }}
+                                    >
+                                        Próxima Lição →
+                                    </button>
+                                )}
+                            </>
                         )}
                     </div>
                 </div>
@@ -686,7 +765,10 @@ const App = () => {
                                 <div
                                     key={themeName}
                                     className={`theme-option ${currentTheme === themeName ? 'selected' : ''}`}
-                                    onClick={() => changeTheme(themeName)}
+                                    onClick={() => {
+                                        changeTheme(themeName);
+                                        setTimeout(() => setShowMenu(false), 300);
+                                    }}
                                     style={{
                                         backgroundColor: t.primary,
                                         color: t.text,
@@ -779,4 +861,5 @@ const App = () => {
 };
 
 // Render the app
-ReactDOM.render(<App />, document.getElementById('root'));
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
