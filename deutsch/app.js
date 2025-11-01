@@ -2,7 +2,7 @@
 
 // Firebase Configuration
 const firebaseConfig = {
-    apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
+    apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaBiatLUcXU",
     authDomain: "deutsch-39779.firebaseapp.com",
     projectId: "deutsch-39779",
     storageBucket: "deutsch-39779.firebasestorage.app",
@@ -24,7 +24,13 @@ const App = () => {
     const [loading, setLoading] = React.useState(true);
     const [userData, setUserData] = React.useState(null);
     const [currentView, setCurrentView] = React.useState('home');
-    const [currentTheme, setCurrentTheme] = React.useState('taylorSwift');
+    
+    // Inicializa o tema lendo do localStorage PRIMEIRO.
+    const [currentTheme, setCurrentTheme] = React.useState(() => {
+        const savedTheme = localStorage.getItem('selectedTheme');
+        return savedTheme || 'taylorSwift';
+    });
+
     const [showMenu, setShowMenu] = React.useState(false);
     const [currentLektion, setCurrentLektion] = React.useState(null);
     const [currentExerciseIndex, setCurrentExerciseIndex] = React.useState(0);
@@ -32,105 +38,91 @@ const App = () => {
     const [feedback, setFeedback] = React.useState(null);
     const [showGrammar, setShowGrammar] = React.useState(false);
 
-    // --- INÍCIO DAS NOVAS MUDANÇAS ---
-    const [isSaving, setIsSaving] = React.useState(false); // Para feedback no botão
-    const [showFinishModal, setShowFinishModal] = React.useState(false); // Para o modal de "finalizado"
-    // --- FIM DAS NOVAS MUDANÇAS ---
+    const [isSaving, setIsSaving] = React.useState(false); 
+    const [showFinishModal, setShowFinishModal] = React.useState(false); 
 
-    // *** INÍCIO DA CORREÇÃO DE SINCRONIZAÇÃO ***
-    // Trocamos o loadUserData por um listener em tempo real (onSnapshot)
-    // que é ativado quando o estado de autenticação muda.
+    // Listener em tempo real (onSnapshot) para dados do usuário
     React.useEffect(() => {
-        let unsubscribeFromFirestore = null; // Variável para guardar o listener do Firestore
+        let unsubscribeFromFirestore = null; 
 
-        // Ouve mudanças na autenticação (login/logout)
         const unsubscribeFromAuth = auth.onAuthStateChanged(async (user) => {
             if (user) {
-                // --- Usuário está logado ---
                 setUser(user);
                 
-                // Limpa qualquer listener antigo (segurança)
                 if (unsubscribeFromFirestore) {
                     unsubscribeFromFirestore();
                 }
 
                 const docRef = db.collection('users').doc(user.uid);
                 
-                // Configura o OUVINTE EM TEMPO REAL (onSnapshot)
-                // Isso substitui o antigo 'loadUserData'
+                // O onSnapshot é a FONTE ÚNICA DE VERDADE.
+                // Ele atualiza o app sempre que os dados mudam no Firebase.
                 unsubscribeFromFirestore = docRef.onSnapshot(async (doc) => {
                     if (doc.exists) {
-                        // 1. Dados do usuário existem, carrega no estado
                         const data = doc.data();
-                        setUserData(data);
-                        setCurrentTheme(data.theme || 'taylorSwift');
+                        const dbTheme = data.theme || 'taylorSwift'; 
+                        
+                        setUserData(data); // Atualiza o estado do React com os dados do FB
+                        setCurrentTheme(dbTheme); // Atualiza o tema
+                        localStorage.setItem('selectedTheme', dbTheme); // Sincroniza o localStorage
+                        
                     } else {
-                        // 2. Dados não existem (pode ser um usuário novo que falhou no index.html)
-                        //    Cria os dados de usuário padrão.
-                        console.log("Criando novo documento de usuário...");
+                        // Isso não deve acontecer se o index.html funcionar, mas é uma segurança.
+                        console.log("Criando novo documento de usuário (fallback)...");
                         const newUserData = {
                             score: 0,
                             completedLektions: [],
-                            theme: 'taylorSwift',
+                            theme: 'taylorSwift', 
                             lektionProgress: {},
                             exerciseStats: {},
                             lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                         };
                         await docRef.set(newUserData);
-                        // O 'onSnapshot' vai disparar de novo automaticamente após o 'set',
-                        // e o bloco 'if (doc.exists)' será executado, carregando os dados.
+                        localStorage.setItem('selectedTheme', 'taylorSwift'); 
                     }
-                    // 3. Para de mostrar o "loading"
                     setLoading(false);
                 }, (error) => {
-                    // Em caso de erro ao ouvir
                     console.error("Erro ao ouvir dados do usuário:", error);
                     setLoading(false);
                 });
 
             } else {
-                // --- Usuário está deslogado ---
                 setUser(null);
                 setUserData(null);
-                // Desconecta o ouvinte do Firestore
                 if (unsubscribeFromFirestore) {
                     unsubscribeFromFirestore();
                 }
-                setLoading(false); // Para de carregar
-                window.location.href = 'index.html'; // Redireciona para login
+                setLoading(false); 
+                window.location.href = 'index.html'; 
             }
         });
 
-        // Função de limpeza do useEffect:
-        // Isso é chamado quando o componente é "desmontado" (app fechado)
         return () => {
-            unsubscribeFromAuth(); // Para de ouvir a autenticação
+            unsubscribeFromAuth(); 
             if (unsubscribeFromFirestore) {
-                unsubscribeFromFirestore(); // Para de ouvir o Firestore
+                unsubscribeFromFirestore(); 
             }
         };
-    }, []); // O array vazio [] garante que este useEffect rode apenas uma vez
-
-    // *** FIM DA CORREÇÃO DE SINCRONIZAÇÃO ***
+    }, []); 
 
     // Initialize Lucide icons
     React.useEffect(() => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    }, [currentView, showMenu, showGrammar, feedback, loading, showFinishModal]); // <-- CORREÇÃO: Adicionado 'loading' e 'showFinishModal'
+    }, [currentView, showMenu, showGrammar, feedback, loading, showFinishModal]); 
     
-    // (A função loadUserData foi removida pois sua lógica agora está no useEffect acima)
 
-    
-    // Save user data to Firestore
+    // --- CORREÇÃO CRÍTICA: saveUserData ---
+    // Esta função AGORA SÓ FALA COM O FIREBASE.
+    // Ela não chama mais o 'setUserData' localmente.
+    // O 'onSnapshot' vai receber a mudança e atualizar o 'setUserData'.
+    // Isso evita "race conditions" e garante a fonte única da verdade.
     const saveUserData = async (data) => {
-        if (!user) return;
+        if (!user || isSaving) return; // Proteção extra
         
         try {
-            // Atualiza o estado local imediatamente para responsividade
-            setUserData(prev => ({ ...prev, ...data }));
-            // Envia para o Firestore
+            // SÓ ATUALIZA O FIREBASE.
             await db.collection('users').doc(user.uid).update({
                 ...data,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
@@ -139,13 +131,13 @@ const App = () => {
             console.error('Error saving data:', error);
         }
     };
+    // --- FIM DA CORREÇÃO ---
+
 
     // Logout
     const handleLogout = async () => {
         try {
             await auth.signOut();
-            // O listener 'onAuthStateChanged' no useEffect vai detectar o logout
-            // e redirecionar para 'index.html'
         } catch (error) {
             console.error('Logout error:', error);
         }
@@ -153,8 +145,9 @@ const App = () => {
 
     // Change theme
     const changeTheme = async (themeName) => {
-        setCurrentTheme(themeName);
-        await saveUserData({ theme: themeName });
+        setCurrentTheme(themeName); // Atualiza o estado do React
+        localStorage.setItem('selectedTheme', themeName); // Atualiza o F5
+        await saveUserData({ theme: themeName }); // Atualiza o Firebase para outros dispositivos
         setShowMenu(false);
     };
 
@@ -202,8 +195,14 @@ const App = () => {
         });
 
         if (isCorrect) {
-            const newScore = (userData?.score || 0) + 10;
-            saveUserData({ score: newScore });
+            // --- CORREÇÃO CRÍTICA DE SINCRONIZAÇÃO (SCORE) ---
+            // Usamos 'increment' para uma atualização atômica.
+            // Isso evita que duas respostas rápidas se sobrescrevam.
+            const scoreUpdate = {
+                score: firebase.firestore.FieldValue.increment(10)
+            };
+            saveUserData(scoreUpdate);
+            // --- FIM DA CORREÇÃO ---
         }
     };
 
@@ -217,8 +216,14 @@ const App = () => {
             setUserAnswer('');
             setFeedback(null);
             
-            const newProgress = { ...(userData.lektionProgress || {}), [lektionId]: nextIndex };
-            saveUserData({ lektionProgress: newProgress }); 
+            // --- CORREÇÃO CRÍTICA DE SINCRONIZAÇÃO (PROGRESSO) ---
+            // Usamos "dot notation" para atualizar APENAS o campo desta lição,
+            // em vez de sobrescrever o objeto 'lektionProgress' inteiro.
+            const progressUpdate = {
+                [`lektionProgress.${lektionId}`]: nextIndex
+            };
+            saveUserData(progressUpdate); 
+            // --- FIM DA CORREÇÃO ---
             
         } else {
             finishLektion();
@@ -227,31 +232,30 @@ const App = () => {
 
     // Finish Lektion
     const finishLektion = async () => {
-        if (!currentLektion || !userData || isSaving) return; // Proteção contra clique duplo
+        if (!currentLektion || !userData || isSaving) return; 
         
-        setIsSaving(true); // Ativa o estado "Salvando"
+        setIsSaving(true); 
         
         const lektionId = currentLektion.id;
-        const completedLektions = [...(userData.completedLektions || [])]; // Cria nova array
-        const isNewCompletion = !completedLektions.includes(lektionId);
+        // Usamos o FieldValue 'arrayUnion' para garantir que a lição
+        // seja adicionada apenas uma vez, de forma atômica.
+        const completedUpdate = {
+            completedLektions: firebase.firestore.FieldValue.arrayUnion(lektionId)
+        };
+        await saveUserData(completedUpdate); // Salva a lição como completa
 
-        if (isNewCompletion) {
-            completedLektions.push(lektionId);
-        }
+        // --- CORREÇÃO CRÍTICA (MESMA DO nextExercise) ---
+        // Salva o progresso final desta lição usando "dot notation".
+        const progressUpdate = {
+            [`lektionProgress.${lektionId}`]: currentLektion.exercises.length
+        };
+        await saveUserData(progressUpdate); // Salva o progresso final
+        // --- FIM DA CORREÇÃO ---
         
-        const newProgress = { ...(userData.lektionProgress || {}), [lektionId]: currentLektion.exercises.length };
-        
-        // Salva os dados
-        await saveUserData({ 
-            completedLektions: completedLektions, 
-            lektionProgress: newProgress 
-        });
-        
-        setIsSaving(false); // Desativa o "Salvando"
-        setShowFinishModal(true); // <-- AQUI! Mostra o modal em vez de navegar
+        setIsSaving(false); 
+        setShowFinishModal(true); 
     };
 
-    // --- NOVA FUNÇÃO ---
     // Chamada pelo botão no novo modal para fechar e navegar
     const handleCloseFinishModal = () => {
         setShowFinishModal(false);
@@ -351,7 +355,7 @@ const App = () => {
             {/* Grammar Modal */}
             {showGrammar && <GrammarModal />}
 
-            {/* --- NOVO MODAL ADICIONADO --- */}
+            {/* Lesson Finished Modal */}
             {showFinishModal && <LessonFinishedModal />}
         </div>
     );
@@ -366,6 +370,7 @@ const App = () => {
             const completed = userData?.completedLektions || [];
             const progress = userData?.lektionProgress || {};
 
+            // 1. Procura por lições em progresso
             for (const lektion of window.exercisesData) {
                 const lektionId = lektion.id;
                 const savedIndex = progress[lektionId] || 0;
@@ -374,12 +379,14 @@ const App = () => {
                 }
             }
 
+            // 2. Procura pela próxima lição não completada
             for (const lektion of window.exercisesData) {
                 if (!completed.includes(lektion.id)) {
                     return lektion; 
                 }
             }
             
+            // 3. Se tudo estiver completo, retorna a primeira
             return window.exercisesData[0];
         }, [userData]);
 
@@ -449,6 +456,7 @@ const App = () => {
                 
                 {window.exercisesData.map((lektion, index) => {
                     const isCompleted = completedLektions.includes(lektion.id);
+                    // Lição está travada se a anterior não estiver completa E não for a primeira lição
                     const isLocked = index > 0 && !completedLektions.includes(window.exercisesData[index - 1].id);
                     
                     const lektionProgress = userData?.lektionProgress || {};
@@ -738,14 +746,13 @@ const App = () => {
                             <button 
                                 className="btn-primary"
                                 onClick={nextExercise} 
-                                disabled={isSaving} // <-- MUDANÇA: Desativa botão ao salvar
+                                disabled={isSaving} 
                                 style={{ 
                                     flex: 1,
                                     background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`,
-                                    opacity: isSaving ? 0.7 : 1 // <-- MUDANÇA: Feedback visual
+                                    opacity: isSaving ? 0.7 : 1 
                                 }}
                             >
-                                {/* --- MUDANÇA: Texto do botão --- */}
                                 {isSaving ? 'Salvando...' : (currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉')}
                             </button>
                         )}
@@ -877,7 +884,7 @@ const App = () => {
         );
     }
 
-    // --- NOVO COMPONENTE MODAL ---
+    // Lesson Finished Modal
     function LessonFinishedModal() {
         return (
             <div className="modal-overlay">
@@ -899,7 +906,7 @@ const App = () => {
                     </p>
                     <button 
                         className="btn-primary"
-                        onClick={handleCloseFinishModal} // Usa a nova função
+                        onClick={handleCloseFinishModal} 
                         style={{ 
                             width: '100%',
                             background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
