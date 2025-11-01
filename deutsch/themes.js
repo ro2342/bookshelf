@@ -23,8 +23,8 @@ window.themes = {
     
     taylorSwift: {
         name: 'Taylor Swift',
-        primary: '#d4af37',
-        bg: '#faf8f3',
+        primary: '#083116',
+        bg: '#106836',
         text: '#2d2d2d',
         card: '#f5f0e8',
         accent: '#c9a961',
