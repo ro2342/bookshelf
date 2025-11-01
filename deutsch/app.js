@@ -1,5 +1,5 @@
 // app.js - Aplicativo React Completo
-// VERSÃO CORRIGIDA: Remove localStorage (usa 100% Firebase) e corrige carregamento lento de ícones.
+// VERSÃO CORRIGIDA: Corrige lentidão de ícones e usa .set({ merge: true }) para salvar.
 
 // Firebase Configuration
 const firebaseConfig = {
@@ -25,11 +25,7 @@ const App = () => {
     const [loading, setLoading] = React.useState(true);
     const [userData, setUserData] = React.useState(null);
     const [currentView, setCurrentView] = React.useState('home');
-    
-    // *** CORREÇÃO TEMA (Firebase) ***
-    // Inicializa com um padrão. O Firebase irá sobrescrevê-lo.
     const [currentTheme, setCurrentTheme] = React.useState('taylorSwift');
-    
     const [showMenu, setShowMenu] = React.useState(false);
     const [currentLektion, setCurrentLektion] = React.useState(null);
     const [currentExerciseIndex, setCurrentExerciseIndex] = React.useState(0);
@@ -53,13 +49,13 @@ const App = () => {
     }, []);
 
     // *** CORREÇÃO ÍCONES LENTOS ***
-    // O array de dependência [currentView] estava errado.
-    // Um array vazio [] garante que isso rode APENAS UMA VEZ.
+    // Roda o createIcons() sempre que uma nova "janela" (view ou modal) é mostrada.
+    // Isso é mais eficiente que o [currentView] original e corrige o bug de não carregar.
     React.useEffect(() => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    }, []); // <-- Array de dependência corrigido para []
+    }, [currentView, showMenu, showGrammar]);
 
     // Load user data from Firestore
     const loadUserData = async (uid) => {
@@ -70,6 +66,7 @@ const App = () => {
             if (doc.exists) {
                 const data = doc.data();
                 
+                // Garante que os campos de progresso existam
                 if (!data.completedLektions) {
                     data.completedLektions = [];
                 }
@@ -77,11 +74,9 @@ const App = () => {
                     data.currentLektionProgress = {};
                 }
                 
-                // *** CORREÇÃO TEMA (Firebase) ***
-                // Lê o tema do Firebase e atualiza o estado.
                 const userTheme = data.theme || 'taylorSwift';
                 setUserData(data);
-                setCurrentTheme(userTheme);
+                setCurrentTheme(userTheme); // Carrega o tema do Firebase
             } else {
                 // Initialize new user data
                 const newUserData = {
@@ -93,7 +88,6 @@ const App = () => {
                 };
                 await docRef.set(newUserData);
                 setUserData(newUserData);
-                // O tema padrão 'taylorSwift' já está definido no estado.
             }
         } catch (error) {
             console.error('Error loading user data:', error);
@@ -105,11 +99,15 @@ const App = () => {
         if (!user) return;
         
         try {
-            await db.collection('users').doc(user.uid).update({
+            // *** CORREÇÃO TEMA/SINCRONIZAÇÃO ***
+            // Troca o .update() por .set({ merge: true })
+            // Isso é mais robusto, assim como a página de login
+            await db.collection('users').doc(user.uid).set({
                 ...data,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            // Atualiza o estado local com os new data
+            }, { merge: true }); // <-- Garante que vai criar ou atualizar, nunca falhar
+            
+            // Atualiza o estado local com os novos dados
             setUserData(prev => ({ ...prev, ...data }));
         } catch (error) {
             console.error('Error saving data:', error);
@@ -129,16 +127,15 @@ const App = () => {
     // Change theme
     const changeTheme = async (themeName) => {
         setCurrentTheme(themeName);
-        // *** CORREÇÃO TEMA (Firebase) ***
-        // Remove a escrita no localStorage.
-        // Salva o tema diretamente no Firebase.
+        // Salva o tema no Firebase. Agora usa a função robusta.
         await saveUserData({ theme: themeName });
         setShowMenu(false);
     };
 
     // Start Lektion
     const startLektion = (lektionId) => {
-        // Correção de bug anterior: Garante que userData existe.
+        // Guarda de segurança: não faz nada se os dados do usuário
+        // ainda não foram carregados (evita crash)
         if (!userData) {
             console.warn("User data not loaded yet, please wait.");
             return;
@@ -150,6 +147,7 @@ const App = () => {
             
             let startIndex = 0;
             if (!isReview) {
+                // Continua de onde parou
                 const savedIndex = userData.currentLektionProgress?.[lektionId];
                 if (savedIndex && savedIndex < lektion.exercises.length) {
                     startIndex = savedIndex;
@@ -190,7 +188,7 @@ const App = () => {
 
         if (isCorrect) {
             const newScore = (userData?.score || 0) + 10;
-            saveUserData({ score: newScore });
+            saveUserData({ score: newScore }); // Salva apenas a pontuação
         }
     };
 
@@ -199,6 +197,7 @@ const App = () => {
         const nextIndex = currentExerciseIndex + 1;
         
         if (nextIndex < currentLektion.exercises.length) {
+            // Se a lição NÃO terminou, salva o progresso e avança
             setCurrentExerciseIndex(nextIndex);
             setUserAnswer('');
             setFeedback(null);
@@ -207,6 +206,7 @@ const App = () => {
             await saveUserData({ currentLektionProgress: newProgress });
 
         } else {
+            // Se a lição TERMINOU, chama finishLektion
             await finishLektion();
         }
     };
@@ -221,7 +221,7 @@ const App = () => {
         }
         
         const newProgress = { ...(userData.currentLektionProgress || {}) };
-        delete newProgress[currentLektion.id];
+        delete newProgress[currentLektion.id]; // Remove dos "em progresso"
         
         await saveUserData({ 
             completedLektions: completedLektions,
@@ -242,8 +242,6 @@ const App = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 minHeight: '100vh',
-                // A tela de loading usará o tema padrão, e mudará
-                // quando o Firebase carregar.
                 backgroundColor: theme.bg
             }}>
                 <div style={{ textAlign: 'center' }}>
@@ -523,3 +521,299 @@ const App = () => {
                                     >
                                         Revisar
                                     </button>
+                                </div>
+                            ) : null;
+                        })
+                    ) : (
+                        <p style={{ opacity: 0.7 }}>Nenhuma lição completada ainda. Vamos começar!</p>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    // EXERCISE VIEW
+    function ExerciseView() {
+        const inputRef = React.useRef(null);
+        
+        if (!currentLektion) return null;
+
+        const exercise = currentLektion.exercises[currentExerciseIndex];
+        const progress = ((currentExerciseIndex + 1) / currentLektion.exercises.length) * 100;
+
+        // Auto-focus input when exercise changes
+        React.useEffect(() => {
+            if (inputRef.current && !feedback) {
+                inputRef.current.focus();
+            }
+        }, [currentExerciseIndex]);
+
+        return (
+            <div>
+                <button 
+                    className="btn-secondary"
+                    onClick={() => {
+                        setCurrentView('map');
+                        setCurrentLektion(null);
+                    }}
+                    style={{ marginBottom: 20, borderColor: theme.primary }}
+                >
+                    ← Voltar ao Mapa
+                </button>
+
+                <div className="card" style={{ backgroundColor: theme.card }}>
+                    <h2 style={{ fontSize: '1.5rem', marginBottom: 10, color: theme.primary }}>
+                        {currentLektion.title}
+                    </h2>
+                    <p style={{ opacity: 0.8, marginBottom: 15 }}>
+                        Exercício {currentExerciseIndex + 1} de {currentLektion.exercises.length}
+                    </p>
+                    <div className="progress-bar" style={{ backgroundColor: theme.border }}>
+                        <div 
+                            className="progress-fill"
+                            style={{ 
+                                width: `${progress}%`,
+                                background: `linear-gradient(90deg, ${theme.primary}, ${theme.accent})`
+                            }}
+                        ></div>
+                    </div>
+                </div>
+
+                <div className="card" style={{ backgroundColor: theme.card }}>
+                    <h3 style={{ fontSize: '1.3rem', marginBottom: 20 }}>
+                        {exercise.question}
+                    </h3>
+
+                    {exercise.type === 'fillBlank' && (
+                        <input 
+                            ref={inputRef}
+                            type="text"
+                            className="input-field"
+                            value={userAnswer}
+                            onChange={(e) => setUserAnswer(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && !feedback && checkAnswer()}
+                            placeholder="Digite sua resposta..."
+                            disabled={!!feedback}
+                            autoComplete="off"
+                            autoFocus
+                            style={{
+                                backgroundColor: theme.bg,
+                                color: theme.text,
+                                borderColor: theme.primary
+                            }}
+                        />
+                    )}
+
+                    {exercise.type === 'multipleChoice' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            {exercise.options.map((option, idx) => (
+                                <button
+                                    key={idx}
+                                    onClick={() => setUserAnswer(option)}
+                                    disabled={!!feedback}
+                                    style={{
+                                        padding: 15,
+                                        border: `3px solid ${userAnswer === option ? theme.primary : theme.border}`,
+                                        borderRadius: 10,
+                                        background: userAnswer === option ? theme.primary : theme.card,
+                                        color: userAnswer === option ? 'white' : theme.text,
+                                        cursor: feedback ? 'not-allowed' : 'pointer',
+                                        fontSize: '1.1rem',
+                                        fontWeight: 600,
+                                        transition: 'all 0.2s ease'
+                                    }}
+                                >
+                                    {option}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {exercise.type === 'translation' && (
+                        <input 
+                            ref={inputRef}
+                            type="text"
+                            className="input-field"
+                            value={userAnswer}
+                            onChange={(e) => setUserAnswer(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && !feedback && checkAnswer()}
+                            placeholder="Traduza para alemão..."
+                            disabled={!!feedback}
+                            autoComplete="off"
+                            autoFocus
+                            style={{
+                                backgroundColor: theme.bg,
+                                color: theme.text,
+                                borderColor: theme.primary
+                            }}
+                        />
+                    )}
+
+                    {feedback && (
+                        <div className={`feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}`}>
+                            {feedback.isCorrect ? '✓' : '✗'}
+                            <div>
+                                <div style={{ fontWeight: 700, marginBottom: 5 }}>
+                                    {feedback.isCorrect ? 'Correto!' : 'Incorreto'}
+                                </div>
+                                <div>{feedback.explanation}</div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                        {!feedback ? (
+                            <>
+                                <button 
+                                    className="btn-primary"
+                                    onClick={checkAnswer}
+                                    disabled={!userAnswer}
+                                    style={{ 
+                                        flex: 1,
+                                        background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`,
+                                        opacity: !userAnswer ? 0.5 : 1
+                                    }}
+                                >
+                                    Verificar Resposta
+                                </button>
+                                <button 
+                                    className="btn-secondary"
+                                    onClick={() => setShowGrammar(true)}
+                                    style={{ borderColor: theme.primary }}
+                                >
+                                    📚 Gramática
+                                </button>
+                            </>
+                        ) : (
+                            <button 
+                                className="btn-primary"
+                                onClick={nextExercise}
+                                style={{ 
+                                    flex: 1,
+                                    background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
+                                }}
+                            >
+                                {currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉'}
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // MENU MODAL
+    function MenuModal() {
+        return (
+            <div className="modal-overlay" onClick={() => setShowMenu(false)}>
+                <div 
+                    className="modal-content" 
+                    style={{ backgroundColor: theme.card }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <h2 style={{ fontSize: '1.8rem', marginBottom: 20, color: theme.primary }}>
+                        Configurações
+                    </h2>
+
+                    <h3 style={{ fontSize: '1.3rem', marginBottom: 15 }}>Escolha seu tema:</h3>
+                    <div className="theme-grid">
+                        {Object.keys(window.themes).map(themeName => {
+                            const t = window.themes[themeName];
+                            return (
+                                <div
+                                    key={themeName}
+                                    className={`theme-option ${currentTheme === themeName ? 'selected' : ''}`}
+                                    onClick={() => changeTheme(themeName)}
+                                    style={{
+                                        backgroundColor: t.primary,
+                                        color: t.text,
+                                        borderColor: currentTheme === themeName ? t.text : 'transparent'
+                                    }}
+                                >
+                                    {t.name}
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div style={{ marginTop: 30 }}>
+                        <button 
+                            className="btn-primary"
+                            onClick={handleLogout}
+                            style={{ 
+                                width: '100%',
+                                background: '#dc3545'
+                            }}
+                        >
+                            Sair
+                        </button>
+                    </div>
+
+                    <button 
+                        className="btn-secondary"
+                        onClick={() => setShowMenu(false)}
+                        style={{ 
+                            width: '100%',
+                            marginTop: 15,
+                            borderColor: theme.primary
+                        }}
+                    >
+                        Fechar
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // GRAMMAR MODAL
+    function GrammarModal() {
+        if (!currentLektion) return null;
+
+        return (
+            <div className="modal-overlay" onClick={() => setShowGrammar(false)}>
+                <div 
+                    className="modal-content" 
+                    style={{ backgroundColor: theme.card }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <h2 style={{ fontSize: '1.8rem', marginBottom: 20, color: theme.primary }}>
+                        Explicações Gramaticais 📚
+                    </h2>
+
+                    {currentLektion.grammarKeys.map(key => {
+                        const explanation = window.grammarExplanations[key];
+                        return explanation ? (
+                            <div key={key} style={{ marginBottom: 25 }}>
+                                <h3 style={{ fontSize: '1.3rem', marginBottom: 10, color: theme.accent }}>
+                                    {explanation.title}
+                                </h3>
+                                <div style={{ 
+                                    whiteSpace: 'pre-line', 
+                                    lineHeight: 1.6,
+                                    opacity: 0.9
+                                }}>
+                                    {explanation.content}
+                                </div>
+                            </div>
+                        ) : null;
+                    })}
+
+                    <button 
+                        className="btn-primary"
+                        onClick={() => setShowGrammar(false)}
+                        style={{ 
+                            width: '100%',
+                            marginTop: 20,
+                            background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
+                        }}
+                    >
+                        Fechar
+                    </button>
+                </div>
+            </div>
+        );
+    }
+};
+
+// Render the app
+ReactDOM.render(<App />, document.getElementById('root'));
