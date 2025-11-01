@@ -125,10 +125,11 @@ function applyTheme(themeName, saveToDb = true) {
     document.documentElement.style.setProperty('--text', theme.text);
     document.documentElement.style.setProperty('--border', theme.border);
     
-    // ATUALIZAÇÃO: Adiciona valores RGB para o "Glassmorphism"
-    document.documentElement.style.setProperty('--text-rgb', theme['text-rgb'] || '45, 32, 51');
-    document.documentElement.style.setProperty('--card-rgb', theme['card-rgb'] || '240, 230, 255');
-    document.documentElement.style.setProperty('--border-rgb', theme['border-rgb'] || '216, 195, 232');
+    // ATUALIZAÇÃO: Constrói o rgba() em JS para garantir a transparência
+    const cardRgb = theme['card-rgb'] || '240, 230, 255';
+    const borderRgb = theme['border-rgb'] || '216, 195, 232';
+    document.documentElement.style.setProperty('--card-bg-transparent', `rgba(${cardRgb}, 0.7)`);
+    document.documentElement.style.setProperty('--border-bg-transparent', `rgba(${borderRgb}, 0.5)`);
 
 
     currentTheme = themeName;
