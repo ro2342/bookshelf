@@ -1,4 +1,5 @@
 // app.js - Aplicativo React Completo
+// VERSÃO CORRIGIDA: Salva o progresso de cada exercício no Firebase.
 
 // Firebase Configuration
 const firebaseConfig = {
@@ -62,6 +63,15 @@ const App = () => {
             
             if (doc.exists) {
                 const data = doc.data();
+                
+                // ***NOVO: Garante que os campos de progresso existam***
+                if (!data.completedLektions) {
+                    data.completedLektions = [];
+                }
+                if (!data.currentLektionProgress) {
+                    data.currentLektionProgress = {};
+                }
+                
                 setUserData(data);
                 setCurrentTheme(data.theme || 'taylorSwift');
             } else {
@@ -69,8 +79,8 @@ const App = () => {
                 const newUserData = {
                     score: 0,
                     completedLektions: [],
+                    currentLektionProgress: {}, // ***NOVO: Campo para progresso "em andamento"***
                     theme: 'taylorSwift',
-                    exerciseStats: {},
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 };
                 await docRef.set(newUserData);
@@ -90,6 +100,7 @@ const App = () => {
                 ...data,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             });
+            // Atualiza o estado local com os novos dados
             setUserData(prev => ({ ...prev, ...data }));
         } catch (error) {
             console.error('Error saving data:', error);
@@ -117,8 +128,20 @@ const App = () => {
     const startLektion = (lektionId) => {
         const lektion = window.exercisesData.find(l => l.id === lektionId);
         if (lektion) {
+            // ***NOVO: Lógica para encontrar o índice inicial***
+            const isReview = userData.completedLektions.includes(lektionId);
+            
+            let startIndex = 0;
+            if (!isReview) {
+                // Se não for revisão, verifica o progresso salvo
+                const savedIndex = userData.currentLektionProgress?.[lektionId];
+                if (savedIndex && savedIndex < lektion.exercises.length) {
+                    startIndex = savedIndex;
+                }
+            }
+            
             setCurrentLektion(lektion);
-            setCurrentExerciseIndex(0);
+            setCurrentExerciseIndex(startIndex); // ***Usa o índice calculado***
             setUserAnswer('');
             setFeedback(null);
             setCurrentView('exercise');
@@ -153,18 +176,28 @@ const App = () => {
         if (isCorrect) {
             // Add points
             const newScore = (userData?.score || 0) + 10;
-            saveUserData({ score: newScore });
+            saveUserData({ score: newScore }); // Salva apenas a pontuação aqui
         }
     };
 
     // Next exercise
-    const nextExercise = () => {
-        if (currentExerciseIndex < currentLektion.exercises.length - 1) {
-            setCurrentExerciseIndex(currentExerciseIndex + 1);
+    const nextExercise = async () => {
+        // ***NOVO: Lógica de progresso movida para cá***
+        const nextIndex = currentExerciseIndex + 1;
+        
+        if (nextIndex < currentLektion.exercises.length) {
+            // Se a lição NÃO terminou, apenas salva o progresso e avança
+            setCurrentExerciseIndex(nextIndex);
             setUserAnswer('');
             setFeedback(null);
+            
+            // Salva o progresso no Firebase
+            const newProgress = { ...(userData.currentLektionProgress || {}), [currentLektion.id]: nextIndex };
+            await saveUserData({ currentLektionProgress: newProgress });
+
         } else {
-            finishLektion();
+            // Se a lição TERMINOU, chama finishLektion
+            await finishLektion();
         }
     };
 
@@ -172,12 +205,23 @@ const App = () => {
     const finishLektion = async () => {
         if (!currentLektion || !userData) return;
         
-        const completedLektions = userData.completedLektions || [];
+        // 1. Adiciona a lição aos "completados"
+        const completedLektions = [...(userData.completedLektions || [])];
         if (!completedLektions.includes(currentLektion.id)) {
             completedLektions.push(currentLektion.id);
-            await saveUserData({ completedLektions });
         }
         
+        // 2. ***NOVO: Remove a lição do "em progresso"***
+        const newProgress = { ...(userData.currentLektionProgress || {}) };
+        delete newProgress[currentLektion.id];
+        
+        // 3. Salva ambas as alterações
+        await saveUserData({ 
+            completedLektions: completedLektions,
+            currentLektionProgress: newProgress 
+        });
+        
+        // 4. Navega de volta ao mapa
         setCurrentLektion(null);
         setCurrentView('map');
     };
@@ -333,6 +377,7 @@ const App = () => {
     // MAP VIEW
     function MapView() {
         const completedLektions = userData?.completedLektions || [];
+        const currentProgress = userData?.currentLektionProgress || {};
         
         return (
             <div>
@@ -342,8 +387,17 @@ const App = () => {
                 
                 {window.exercisesData.map((lektion, index) => {
                     const isCompleted = completedLektions.includes(lektion.id);
+                    // ***NOVO: Verifica se está em progresso***
+                    const inProgressIndex = currentProgress[lektion.id];
                     const isLocked = index > 0 && !completedLektions.includes(window.exercisesData[index - 1].id);
                     
+                    let buttonText = 'Iniciar';
+                    if (isCompleted) {
+                        buttonText = 'Revisar';
+                    } else if (inProgressIndex > 0) {
+                        buttonText = 'Continuar'; // ***NOVO: Texto do botão***
+                    }
+
                     return (
                         <div 
                             key={lektion.id}
@@ -365,6 +419,12 @@ const App = () => {
                                 <span style={{ opacity: 0.7 }}>
                                     📝 {lektion.exercises.length} exercícios
                                 </span>
+                                {/* ***NOVO: Mostra o progresso*** */}
+                                {inProgressIndex > 0 && !isCompleted && (
+                                    <span style={{ opacity: 0.7, fontWeight: 600, color: theme.accent }}>
+                                        {inProgressIndex} / {lektion.exercises.length}
+                                    </span>
+                                )}
                                 {!isLocked && (
                                     <button 
                                         className="btn-secondary"
@@ -374,7 +434,7 @@ const App = () => {
                                             color: theme.text
                                         }}
                                     >
-                                        {isCompleted ? 'Revisar' : 'Iniciar'}
+                                        {buttonText} {/* ***Usa o texto dinâmico*** */}
                                     </button>
                                 )}
                             </div>
@@ -629,6 +689,7 @@ const App = () => {
                                     background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                                 }}
                             >
+                                {/* O texto do botão agora é gerenciado pela lógica em nextExercise */}
                                 {currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉'}
                             </button>
                         )}
