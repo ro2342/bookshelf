@@ -1,7 +1,7 @@
 // app.js - Aplicativo React Completo
 
 // Firebase Configuration
-  const firebaseConfig = {
+const firebaseConfig = {
     apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
     authDomain: "deutsch-39779.firebaseapp.com",
     projectId: "deutsch-39779",
@@ -9,19 +9,14 @@
     messagingSenderId: "672743327567",
     appId: "1:672743327567:web:8875f89b1f282b7aba273a",
     measurementId: "G-XYVLCZD740"
-  };
+};
 
-// --- CORREÇÃO CRÍTICA: SINTAXE v9 COMPAT (GLOBAL) ---
-// O app.html agora carrega 'firebase-*-compat.js', que cria o objeto global 'firebase'.
-// Usamos a sintaxe v9 compatível (ex: firebase.auth())
-
-// 1. Inicializa os serviços v9 COMPAT
-// Não há 'import' ou 'destructuring' aqui.
-const app = firebase.initializeApp(firebaseConfig);
+// Initialize Firebase
+if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+}
 const auth = firebase.auth();
 const db = firebase.firestore();
-// --- FIM DA CORREÇÃO ---
-
 
 // Main App Component
 const App = () => {
@@ -29,12 +24,7 @@ const App = () => {
     const [loading, setLoading] = React.useState(true);
     const [userData, setUserData] = React.useState(null);
     const [currentView, setCurrentView] = React.useState('home');
-    
-    const [currentTheme, setCurrentTheme] = React.useState(() => {
-        const savedTheme = localStorage.getItem('selectedTheme');
-        return savedTheme || 'taylorSwift';
-    });
-
+    const [currentTheme, setCurrentTheme] = React.useState('taylorSwift');
     const [showMenu, setShowMenu] = React.useState(false);
     const [currentLektion, setCurrentLektion] = React.useState(null);
     const [currentExerciseIndex, setCurrentExerciseIndex] = React.useState(0);
@@ -42,111 +32,95 @@ const App = () => {
     const [feedback, setFeedback] = React.useState(null);
     const [showGrammar, setShowGrammar] = React.useState(false);
 
-    const [isSaving, setIsSaving] = React.useState(false); 
-    const [showFinishModal, setShowFinishModal] = React.useState(false); 
-
-    // Listener em tempo real (onSnapshot) para dados do usuário
+    // Check authentication
     React.useEffect(() => {
-        let unsubscribeFromFirestore = null; 
-
-        // ATUALIZADO para a sintaxe v9 COMPAT: firebase.auth().onAuthStateChanged(...)
-        const unsubscribeFromAuth = firebase.auth().onAuthStateChanged(async (user) => {
+        const unsubscribe = auth.onAuthStateChanged(async (user) => {
             if (user) {
                 setUser(user);
-                
-                if (unsubscribeFromFirestore) {
-                    unsubscribeFromFirestore();
-                }
-
-                // ATUALIZADO para a sintaxe v9 COMPAT: firebase.firestore().doc('caminho/docId')
-                const docRef = firebase.firestore().doc(`users/${user.uid}`);
-                
-                // ATUALIZADO para a sintaxe v9 COMPAT: docRef.onSnapshot(...)
-                // O onSnapshot é a "Fonte Única da Verdade"
-                unsubscribeFromFirestore = docRef.onSnapshot(async (doc) => {
-                    if (doc.exists) {
-                        const data = doc.data();
-                        const dbTheme = data.theme || 'taylorSwift'; 
-                        
-                        setUserData(data); 
-                        setCurrentTheme(dbTheme); 
-                        localStorage.setItem('selectedTheme', dbTheme); 
-                        
-                    } else {
-                        // Fallback caso o 'auth.js' falhe (não deve acontecer)
-                        console.log("Criando novo documento de usuário (fallback)...");
-                        const newUserData = {
-                            score: 0,
-                            completedLektions: [],
-                            theme: 'taylorSwift', 
-                            lektionProgress: {},
-                            exerciseStats: {},
-                            // ATUALIZADO v9 COMPAT: firebase.firestore.FieldValue.serverTimestamp()
-                            lastUpdated: firebase.firestore.FieldValue.serverTimestamp() 
-                        };
-                        // ATUALIZADO v9 COMPAT: docRef.set(...)
-                        await docRef.set(newUserData);
-                        localStorage.setItem('selectedTheme', 'taylorSwift'); 
-                    }
-                    setLoading(false);
-                }, (error) => {
-                    console.error("Erro ao ouvir dados do usuário:", error);
-                    setLoading(false);
-                });
-
+                await loadUserData(user.uid); // Esta função foi modificada
             } else {
-                setUser(null);
-                setUserData(null);
-                if (unsubscribeFromFirestore) {
-                    unsubscribeFromFirestore();
-                }
-                setLoading(false); 
-                window.location.href = 'index.html'; 
+                window.location.href = 'index.html';
             }
+            setLoading(false);
         });
 
-        return () => {
-            unsubscribeFromAuth(); 
-            if (unsubscribeFromFirestore) {
-                unsubscribeFromFirestore(); 
-            }
-        };
-    }, []); 
+        return () => unsubscribe();
+    }, []);
 
-    // Initialize Lucide icons
+    // Initialize Lucide icons only once
     React.useEffect(() => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    }, [currentView, showMenu, showGrammar, feedback, loading, showFinishModal]); 
-    
+    }, [currentView]); // Only re-run when view changes
 
-    // --- CORREÇÃO: saveUserData (ATUALIZADA PARA v9 COMPAT) ---
-    // Esta função AGORA SÓ FALA COM O FIREBASE.
+    
+    // --- INÍCIO DA MODIFICAÇÃO ---
+
+    // Load user data from Firestore
+    const loadUserData = async (uid) => {
+        try {
+            const docRef = db.collection('users').doc(uid);
+            const doc = await docRef.get();
+
+            // Pega o tema que o usuário selecionou na página de login
+            const loginTheme = localStorage.getItem('selectedTheme') || 'taylorSwift';
+            // Pega informações do usuário logado (nome, etc)
+            const currentUser = auth.currentUser;
+            
+            if (doc.exists) {
+                // O usuário já existe, apenas carregue os dados
+                const data = doc.data();
+                setUserData(data);
+                // Usa o tema salvo na nuvem, ou o tema do login se for a primeira vez
+                setCurrentTheme(data.theme || loginTheme); 
+            } else {
+                // O usuário NÃO existe, crie o documento pela primeira vez
+                const newUserData = {
+                    score: 0,
+                    completedLektions: [],
+                    theme: loginTheme, // Usa o tema da página de login
+                    exerciseStats: {},
+                    // Adiciona informações do perfil automaticamente
+                    displayName: currentUser ? currentUser.displayName : 'Estudante',
+                    email: currentUser ? currentUser.email : '',
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                await docRef.set(newUserData); // Cria o documento
+                setUserData(newUserData); // Salva no estado do React
+                setCurrentTheme(loginTheme);
+                
+                // Limpa o localStorage, pois o tema já está salvo na nuvem
+                localStorage.removeItem('selectedTheme');
+            }
+        } catch (error) {
+            console.error('Error loading user data:', error);
+        }
+    };
+
+    // --- FIM DA MODIFICAÇÃO ---
+
+
+    // Save user data to Firestore
     const saveUserData = async (data) => {
-        if (!user) return; 
+        if (!user) return;
         
         try {
-            // ATUALIZADO v9 COMPAT: firebase.firestore().doc(...)
-            const docRef = firebase.firestore().doc(`users/${user.uid}`);
-            // ATUALIZADO v9 COMPAT: docRef.update(...)
-            await docRef.update({
+            await db.collection('users').doc(user.uid).update({
                 ...data,
-                // ATUALIZADO v9 COMPAT: firebase.firestore.FieldValue.serverTimestamp()
-                lastUpdated: firebase.firestore.FieldValue.serverTimestamp() 
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             });
+            setUserData(prev => ({ ...prev, ...data }));
         } catch (error) {
             console.error('Error saving data:', error);
         }
     };
-    // --- FIM DA CORREÇÃO ---
-
 
     // Logout
     const handleLogout = async () => {
         try {
-            // ATUALIZADO v9 COMPAT: firebase.auth().signOut()
-            await firebase.auth().signOut();
+            await auth.signOut();
+            window.location.href = 'index.html';
         } catch (error) {
             console.error('Logout error:', error);
         }
@@ -154,25 +128,17 @@ const App = () => {
 
     // Change theme
     const changeTheme = async (themeName) => {
-        setCurrentTheme(themeName); 
-        localStorage.setItem('selectedTheme', themeName); 
-        await saveUserData({ theme: themeName }); 
+        setCurrentTheme(themeName);
+        await saveUserData({ theme: themeName });
         setShowMenu(false);
     };
 
     // Start Lektion
     const startLektion = (lektionId) => {
         const lektion = window.exercisesData.find(l => l.id === lektionId);
-        if (lektion && userData) { 
-            const lektionProgress = userData.lektionProgress || {};
-            let startIndex = lektionProgress[lektionId] || 0;
-
-            if (startIndex >= lektion.exercises.length) {
-                startIndex = 0;
-            }
-
+        if (lektion) {
             setCurrentLektion(lektion);
-            setCurrentExerciseIndex(startIndex); 
+            setCurrentExerciseIndex(0);
             setUserAnswer('');
             setFeedback(null);
             setCurrentView('exercise');
@@ -188,6 +154,7 @@ const App = () => {
         const correctAns = exercise.answer.toLowerCase();
         const alternatives = exercise.alternatives || [];
         
+        // Handle multi-part answers (e.g., "fährt|ab")
         const correctAnswers = [correctAns, ...alternatives.map(a => a.toLowerCase())];
         const isCorrect = correctAnswers.some(ans => {
             if (ans.includes('|')) {
@@ -204,35 +171,18 @@ const App = () => {
         });
 
         if (isCorrect) {
-            // --- CORREÇÃO (SCORE) (v9 COMPAT) ---
-            const scoreUpdate = {
-                // ATUALIZADO v9 COMPAT: firebase.firestore.FieldValue.increment(10)
-                score: firebase.firestore.FieldValue.increment(10) 
-            };
-            saveUserData(scoreUpdate);
-            // --- FIM DA CORREÇÃO ---
+            // Add points
+            const newScore = (userData?.score || 0) + 10;
+            saveUserData({ score: newScore });
         }
     };
 
     // Next exercise
     const nextExercise = () => {
-        if (!currentLektion) return; 
-        
-        const lektionId = currentLektion.id;
-
         if (currentExerciseIndex < currentLektion.exercises.length - 1) {
-            const nextIndex = currentExerciseIndex + 1;
-            setCurrentExerciseIndex(nextIndex);
+            setCurrentExerciseIndex(currentExerciseIndex + 1);
             setUserAnswer('');
             setFeedback(null);
-            
-            // --- CORREÇÃO (PROGRESSO) (v9 COMPAT) ---
-            const progressUpdate = {
-                [`lektionProgress.${lektionId}`]: nextIndex
-            };
-            saveUserData(progressUpdate); 
-            // --- FIM DA CORREÇÃO ---
-            
         } else {
             finishLektion();
         }
@@ -240,30 +190,14 @@ const App = () => {
 
     // Finish Lektion
     const finishLektion = async () => {
-        if (!currentLektion || !userData || isSaving) return; 
+        if (!currentLektion || !userData) return;
         
-        setIsSaving(true); 
+        const completedLektions = userData.completedLektions || [];
+        if (!completedLektions.includes(currentLektion.id)) {
+            completedLektions.push(currentLektion.id);
+            await saveUserData({ completedLektions });
+        }
         
-        const lektionId = currentLektion.id;
-        // ATUALIZADO v9 COMPAT: firebase.firestore.FieldValue.arrayUnion(lektionId)
-        const completedUpdate = {
-            completedLektions: firebase.firestore.FieldValue.arrayUnion(lektionId) 
-        };
-        await saveUserData(completedUpdate); 
-
-        // ATUALIZADO v9 COMPAT: "dot notation"
-        const progressUpdate = {
-            [`lektionProgress.${lektionId}`]: currentLektion.exercises.length
-        };
-        await saveUserData(progressUpdate); 
-        
-        setIsSaving(false); 
-        setShowFinishModal(true); 
-    };
-
-    // Chamada pelo botão no novo modal para fechar e navegar
-    const handleCloseFinishModal = () => {
-        setShowFinishModal(false);
         setCurrentLektion(null);
         setCurrentView('map');
     };
@@ -359,36 +293,6 @@ const App = () => {
 
             {/* Grammar Modal */}
             {showGrammar && <GrammarModal />}
-            
-            {/* --- NOVO MODAL DE CONCLUSÃO --- */}
-            {showFinishModal && (
-                <div className="modal-overlay" onClick={handleCloseFinishModal}>
-                    <div 
-                        className="modal-content" 
-                        style={{ backgroundColor: theme.card, textAlign: 'center' }}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div style={{ fontSize: '5rem', marginBottom: 20 }}>✅</div>
-                        <h2 style={{ fontSize: '1.8rem', marginBottom: 20, color: theme.primary }}>
-                            Lição Finalizada!
-                        </h2>
-                        <p style={{ fontSize: '1.1rem', opacity: 0.8, marginBottom: 30 }}>
-                            Seu progresso foi salvo com sucesso.
-                        </p>
-                        <button 
-                            className="btn-primary"
-                            onClick={handleCloseFinishModal}
-                            style={{ 
-                                width: '100%',
-                                background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
-                            }}
-                        >
-                            Voltar ao Mapa
-                        </button>
-                    </div>
-                </div>
-            )}
-            {/* --- FIM DO NOVO MODAL --- */}
         </div>
     );
 
@@ -396,13 +300,16 @@ const App = () => {
     function HomeView() {
         const totalLektions = window.exercisesData.length;
         const completedCount = userData?.completedLektions?.length || 0;
-        const progress = totalLektions > 0 ? (completedCount / totalLektions) * 100 : 0;
+        const progress = (completedCount / totalLektions) * 100;
 
         return (
             <div>
                 <div className="card" style={{ backgroundColor: theme.card }}>
                     <h1 style={{ fontSize: '2rem', marginBottom: 15, color: theme.primary }}>
-                        Olá, {user?.displayName?.split(' ')[0] || 'Estudante'}! 👋
+                        {/* MODIFICADO: Puxa o 'displayName' dos dados do usuário (userData) 
+                          ao invés de 'user' (que é só do auth).
+                        */}
+                        Olá, {userData?.displayName?.split(' ')[0] || 'Estudante'}! 👋
                     </h1>
                     <p style={{ fontSize: '1.1rem', opacity: 0.8 }}>
                         Bem-vindo ao seu curso de alemão A1.1
@@ -458,7 +365,6 @@ const App = () => {
                 
                 {window.exercisesData.map((lektion, index) => {
                     const isCompleted = completedLektions.includes(lektion.id);
-                    // Lógica de "locked" original (precisa da lição anterior completa)
                     const isLocked = index > 0 && !completedLektions.includes(window.exercisesData[index - 1].id);
                     
                     return (
@@ -507,7 +413,7 @@ const App = () => {
         const totalLektions = window.exercisesData.length;
         const completedCount = userData?.completedLektions?.length || 0;
         const totalExercises = window.exercisesData.reduce((sum, l) => sum + l.exercises.length, 0);
-        const progress = totalLektions > 0 ? (completedCount / totalLektions) * 100 : 0;
+        const progress = (completedCount / totalLektions) * 100;
 
         return (
             <div>
@@ -709,7 +615,7 @@ const App = () => {
                                 <div style={{ fontWeight: 700, marginBottom: 5 }}>
                                     {feedback.isCorrect ? 'Correto!' : 'Incorreto'}
                                 </div>
-                                <div dangerouslySetInnerHTML={{ __html: feedback.explanation }} />
+                                <div>{feedback.explanation}</div>
                             </div>
                         </div>
                     )}
@@ -741,13 +647,12 @@ const App = () => {
                             <button 
                                 className="btn-primary"
                                 onClick={nextExercise}
-                                disabled={isSaving} // Desabilita o botão enquanto salva
                                 style={{ 
                                     flex: 1,
                                     background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                                 }}
                             >
-                                {isSaving ? 'Salvando...' : (currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉')}
+                                {currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉'}
                             </button>
                         )}
                     </div>
@@ -841,14 +746,12 @@ const App = () => {
                                 <h3 style={{ fontSize: '1.3rem', marginBottom: 10, color: theme.accent }}>
                                     {explanation.title}
                                 </h3>
-                                {/* Usando dangerouslySetInnerHTML para renderizar o HTML */}
-                                <div 
-                                    style={{ 
-                                        lineHeight: 1.6,
-                                        opacity: 0.9
-                                    }}
-                                    dangerouslySetInnerHTML={{ __html: explanation.content }}
-                                >
+                                <div style={{ 
+                                    whiteSpace: 'pre-line', 
+                                    lineHeight: 1.6,
+                                    opacity: 0.9
+                                }}>
+                                    {explanation.content}
                                 </div>
                             </div>
                         ) : null;
