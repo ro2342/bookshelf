@@ -150,10 +150,14 @@
         </div>
     </div>
 
-    <!-- Firebase -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <!-- === MUDANÇA CRÍTICA DE SDK (COMO O BOOKTRACKER) === -->
+    <!-- Removemos as bibliotecas antigas 'compat.js' -->
+    <!-- Carregamos as novas bibliotecas modulares v11+ -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
+    <!-- === FIM DA MUDANÇA === -->
+
 
     <!-- Themes -->
     <script src="themes.js"></script>
@@ -170,10 +174,19 @@
             measurementId: "G-XYVLCZD740"
         };
 
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
+        // --- LÓGICA DE LOGIN ATUALIZADA PARA O SDK v9+ (MODULAR) ---
+        
+        // 1. Inicializa o Firebase
+        const app = firebase.app.initializeApp(firebaseConfig);
+        
+        // 2. Obtém os serviços usando a sintaxe v9 (do objeto global)
+        const auth = firebase.auth.getAuth(app);
+        const db = firebase.firestore.getFirestore(app);
+        
+        // 3. Destrutura as funções necessárias (como no booktracker)
+        const { GoogleAuthProvider, signInWithPopup, onAuthStateChanged } = firebase.auth;
+        const { doc, getDoc, setDoc, updateDoc, serverTimestamp } = firebase.firestore;
+
 
         // Selected theme
         let selectedTheme = 'taylorSwift';
@@ -205,28 +218,27 @@
             });
         }
 
-        // Google Sign In
+        // Google Sign In (Atualizado para v9)
         document.getElementById('loginBtn').addEventListener('click', async () => {
             const loading = document.getElementById('loading');
             loading.style.display = 'block';
             
             try {
-                const provider = new firebase.auth.GoogleAuthProvider();
-                const result = await auth.signInWithPopup(provider);
+                const provider = new GoogleAuthProvider();
+                const result = await signInWithPopup(auth, provider);
                 const user = result.user;
 
-                // --- CORREÇÃO CRÍTICA DE SINCRONIZAÇÃO ---
-                // Verificamos se o usuário JÁ EXISTE antes de escrever
-                const docRef = db.collection('users').doc(user.uid);
-                const doc = await docRef.get();
+                // Lógica de verificação (a mesma que corrigimos antes, agora com v9)
+                const docRef = doc(db, 'users', user.uid);
+                const docSnap = await getDoc(docRef);
 
-                if (!doc.exists) {
+                if (!docSnap.exists()) {
                     // 1. NOVO USUÁRIO: Cria o documento com os dados padrão
-                    await docRef.set({
+                    await setDoc(docRef, {
                         email: user.email,
                         displayName: user.displayName,
                         theme: selectedTheme, // Salva o tema escolhido
-                        lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
+                        lastLogin: serverTimestamp(),
                         score: 0,
                         completedLektions: [],
                         lektionProgress: {},
@@ -234,9 +246,8 @@
                     });
                 } else {
                     // 2. USUÁRIO EXISTENTE: Apenas atualiza o 'lastLogin'
-                    // NÃO TOQUE no tema ou progresso, deixe o app.js cuidar disso.
-                    await docRef.update({
-                        lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+                    await updateDoc(docRef, {
+                        lastLogin: serverTimestamp()
                     });
                 }
                 // --- FIM DA CORREÇÃO ---
@@ -253,8 +264,8 @@
             }
         });
 
-        // Check if user is already logged in
-        auth.onAuthStateChanged((user) => {
+        // Check if user is already logged in (Atualizado para v9)
+        onAuthStateChanged(auth, (user) => {
             if (user) {
                 window.location.href = 'app.html';
             }
