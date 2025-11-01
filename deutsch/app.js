@@ -95,6 +95,27 @@ function initFirebase() {
 function initializeAppLogic() {
     console.log("App lógico iniciado para o usuário:", userId);
     
+    // --- NOVA VERIFICAÇÃO DE DADOS ---
+    if (Object.keys(allThemes).length === 0) {
+        document.body.innerHTML = `<div style="padding: 20px; font-family: sans-serif; color: #111;">
+            <h1>Erro Crítico de Carregamento</h1>
+            <p>O ficheiro <strong>themes.js</strong> não foi carregado ou está vazio.</p>
+            <p>Por favor, verifique se o ficheiro existe e se o nome em <code>app.html</code> está correto.</p>
+        </div>`;
+        console.error("ERRO: themes.js não carregou. 'window.themes' está vazio.");
+        return; // Para a execução
+    }
+    if (allLektions.length === 0) {
+         document.body.innerHTML = `<div style="padding: 20px; font-family: sans-serif; color: #111;">
+            <h1>Erro Crítico de Carregamento</h1>
+            <p>O ficheiro <strong>exercisesData.js</strong> não foi carregado ou está vazio.</p>
+            <p>Por favor, verifique se o ficheiro existe e se o nome em <code>app.html</code> está correto.</p>
+        </div>`;
+        console.error("ERRO: exercisesData.js não carregou. 'window.exercisesData' está vazio.");
+        return; // Para a execução
+    }
+    // --- FIM DA NOVA VERIFICAÇÃO ---
+
     // ATUALIZAÇÃO: Adiciona CSS dinâmico para legibilidade dos temas
     const styleSheet = document.createElement("style");
     styleSheet.type = "text/css";
@@ -178,7 +199,11 @@ function listenToProfile() {
         
         applyTheme(userProfile.theme || 'taylorSwift', false);
         
-        document.getElementById('page-loader').classList.add('hidden');
+        // Garante que o loader existe antes de o esconder
+        const loader = document.getElementById('page-loader');
+        if (loader) {
+            loader.classList.add('hidden');
+        }
         router(); // Roda o router pela primeira vez
     }, (error) => {
         console.error("Erro ao ouvir perfil:", error);
@@ -249,6 +274,9 @@ function handleEscKey(event) {
 
 function showLoading(message = 'Carregando...') {
     // Usa o mesmo estilo de modal para consistência
+    const modalContent = document.getElementById('modal-content'); // Pega o modal content
+    if (!modalContent) return; // Segurança
+
     modalContent.innerHTML = `
         <div class="flex flex-col items-center justify-center p-8 text-center" style="color: var(--text);">
             <svg class="animate-spin h-8 w-8 mb-4" style="color: var(--primary);" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -788,7 +816,7 @@ function showGrammarModal() {
     const grammarHtml = currentLektion.grammarKeys.map(key => {
         const explanation = allGrammar[key];
         return explanation ? `
-            <div classmb-6>
+            <div class="mb-6"> <!-- Corrigido de classmb-6 -->
                 <h3 class="text-xl font-bold mb-3" style="color: var(--primary);">${explanation.title}</h3>
                 <div class="text-gray-700 whitespace-pre-line leading-relaxed break-words">
                     ${parseSimpleMarkdown(explanation.content)}
@@ -893,5 +921,4 @@ async function finishLektion() {
 
 // --- INICIALIZAÇÃO DO APP ---
 initFirebase();
-
 
