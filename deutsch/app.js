@@ -11,32 +11,16 @@
     measurementId: "G-XYVLCZD740"
   };
 
+// --- CORREÇÃO CRÍTICA: SINTAXE v9 COMPAT (GLOBAL) ---
+// O app.html agora carrega 'firebase-*-compat.js', que cria o objeto global 'firebase'.
+// Usamos a sintaxe v9 compatível (ex: firebase.auth())
 
-// --- REFAKTOR CRÍTICO PARA O SDK v9+ (MODULAR) ---
-// Como o booktracker.js, usamos as funções modulares.
-// Como estamos no Babel (e não em um módulo JS nativo), puxamos do objeto global 'firebase'.
-
-// 1. Destrutura as funções principais
-const { initializeApp } = firebase.app;
-const { getAuth, onAuthStateChanged, signOut } = firebase.auth;
-const { 
-    getFirestore, 
-    doc, 
-    onSnapshot, 
-    updateDoc, 
-    setDoc, 
-    serverTimestamp, // Novo timestamp
-    increment,       // Nova função atômica (como no booktracker)
-    arrayUnion       // Nova função atômica (como no booktracker)
-} = firebase.firestore;
-
-// 2. Inicializa os serviços v9
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// As variáveis globais 'firebase.auth()' e 'firebase.firestore()' não são mais usadas.
-// --- FIM DA REFAKTOR ---
+// 1. Inicializa os serviços v9 COMPAT
+// Não há 'import' ou 'destructuring' aqui.
+const app = firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+// --- FIM DA CORREÇÃO ---
 
 
 // Main App Component
@@ -46,7 +30,6 @@ const App = () => {
     const [userData, setUserData] = React.useState(null);
     const [currentView, setCurrentView] = React.useState('home');
     
-    // Inicializa o tema lendo do localStorage PRIMEIRO.
     const [currentTheme, setCurrentTheme] = React.useState(() => {
         const savedTheme = localStorage.getItem('selectedTheme');
         return savedTheme || 'taylorSwift';
@@ -66,8 +49,8 @@ const App = () => {
     React.useEffect(() => {
         let unsubscribeFromFirestore = null; 
 
-        // ATUALIZADO para a sintaxe v9: onAuthStateChanged(auth, ...)
-        const unsubscribeFromAuth = onAuthStateChanged(auth, async (user) => {
+        // ATUALIZADO para a sintaxe v9 COMPAT: firebase.auth().onAuthStateChanged(...)
+        const unsubscribeFromAuth = firebase.auth().onAuthStateChanged(async (user) => {
             if (user) {
                 setUser(user);
                 
@@ -75,22 +58,22 @@ const App = () => {
                     unsubscribeFromFirestore();
                 }
 
-                // ATUALIZADO para a sintaxe v9: doc(db, 'collection', 'id')
-                const docRef = doc(db, 'users', user.uid);
+                // ATUALIZADO para a sintaxe v9 COMPAT: firebase.firestore().doc('caminho/docId')
+                const docRef = firebase.firestore().doc(`users/${user.uid}`);
                 
-                // ATUALIZADO para a sintaxe v9: onSnapshot(docRef, ...)
+                // ATUALIZADO para a sintaxe v9 COMPAT: docRef.onSnapshot(...)
                 // O onSnapshot é a "Fonte Única da Verdade"
-                unsubscribeFromFirestore = onSnapshot(docRef, async (doc) => {
-                    if (doc.exists()) {
+                unsubscribeFromFirestore = docRef.onSnapshot(async (doc) => {
+                    if (doc.exists) {
                         const data = doc.data();
                         const dbTheme = data.theme || 'taylorSwift'; 
                         
-                        setUserData(data); // Atualiza o estado do React com os dados do FB
-                        setCurrentTheme(dbTheme); // Atualiza o tema
-                        localStorage.setItem('selectedTheme', dbTheme); // Sincroniza o localStorage
+                        setUserData(data); 
+                        setCurrentTheme(dbTheme); 
+                        localStorage.setItem('selectedTheme', dbTheme); 
                         
                     } else {
-                        // Isso não deve acontecer se o index.html funcionar, mas é uma segurança.
+                        // Fallback caso o 'auth.js' falhe (não deve acontecer)
                         console.log("Criando novo documento de usuário (fallback)...");
                         const newUserData = {
                             score: 0,
@@ -98,10 +81,11 @@ const App = () => {
                             theme: 'taylorSwift', 
                             lektionProgress: {},
                             exerciseStats: {},
-                            lastUpdated: serverTimestamp() // v9
+                            // ATUALIZADO v9 COMPAT: firebase.firestore.FieldValue.serverTimestamp()
+                            lastUpdated: firebase.firestore.FieldValue.serverTimestamp() 
                         };
-                        // ATUALIZADO para a sintaxe v9: setDoc(docRef, ...)
-                        await setDoc(docRef, newUserData);
+                        // ATUALIZADO v9 COMPAT: docRef.set(...)
+                        await docRef.set(newUserData);
                         localStorage.setItem('selectedTheme', 'taylorSwift'); 
                     }
                     setLoading(false);
@@ -137,20 +121,19 @@ const App = () => {
     }, [currentView, showMenu, showGrammar, feedback, loading, showFinishModal]); 
     
 
-    // --- CORREÇÃO CRÍTICA: saveUserData (ATUALIZADA PARA v9) ---
+    // --- CORREÇÃO: saveUserData (ATUALIZADA PARA v9 COMPAT) ---
     // Esta função AGORA SÓ FALA COM O FIREBASE.
-    // Ela não chama mais o 'setUserData' localmente.
-    // O 'onSnapshot' vai receber a mudança e atualizar o 'setUserData'.
-    // Isso evita "race conditions" e garante a fonte única da verdade.
     const saveUserData = async (data) => {
-        if (!user) return; // Proteção contra salvamento antes do user carregar
+        if (!user) return; 
         
         try {
-            // ATUALIZADO para a sintaxe v9: updateDoc(docRef, ...)
-            const docRef = doc(db, 'users', user.uid);
-            await updateDoc(docRef, {
+            // ATUALIZADO v9 COMPAT: firebase.firestore().doc(...)
+            const docRef = firebase.firestore().doc(`users/${user.uid}`);
+            // ATUALIZADO v9 COMPAT: docRef.update(...)
+            await docRef.update({
                 ...data,
-                lastUpdated: serverTimestamp() // v9
+                // ATUALIZADO v9 COMPAT: firebase.firestore.FieldValue.serverTimestamp()
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp() 
             });
         } catch (error) {
             console.error('Error saving data:', error);
@@ -162,8 +145,8 @@ const App = () => {
     // Logout
     const handleLogout = async () => {
         try {
-            // ATUALIZADO para a sintaxe v9: signOut(auth)
-            await signOut(auth);
+            // ATUALIZADO v9 COMPAT: firebase.auth().signOut()
+            await firebase.auth().signOut();
         } catch (error) {
             console.error('Logout error:', error);
         }
@@ -171,20 +154,19 @@ const App = () => {
 
     // Change theme
     const changeTheme = async (themeName) => {
-        setCurrentTheme(themeName); // Atualiza o estado do React
-        localStorage.setItem('selectedTheme', themeName); // Atualiza o F5
-        await saveUserData({ theme: themeName }); // Atualiza o Firebase para outros dispositivos
+        setCurrentTheme(themeName); 
+        localStorage.setItem('selectedTheme', themeName); 
+        await saveUserData({ theme: themeName }); 
         setShowMenu(false);
     };
 
     // Start Lektion
     const startLektion = (lektionId) => {
         const lektion = window.exercisesData.find(l => l.id === lektionId);
-        if (lektion && userData) { // Garante que userData não é nulo
+        if (lektion && userData) { 
             const lektionProgress = userData.lektionProgress || {};
             let startIndex = lektionProgress[lektionId] || 0;
 
-            // Se o progresso salvo for igual ou maior que o total, reinicia (para revisão)
             if (startIndex >= lektion.exercises.length) {
                 startIndex = 0;
             }
@@ -222,10 +204,10 @@ const App = () => {
         });
 
         if (isCorrect) {
-            // --- CORREÇÃO CRÍTICA DE SINCRONIZAÇÃO (SCORE) ---
-            // Usamos 'increment' (v9) para uma atualização atômica.
+            // --- CORREÇÃO (SCORE) (v9 COMPAT) ---
             const scoreUpdate = {
-                score: increment(10) // v9
+                // ATUALIZADO v9 COMPAT: firebase.firestore.FieldValue.increment(10)
+                score: firebase.firestore.FieldValue.increment(10) 
             };
             saveUserData(scoreUpdate);
             // --- FIM DA CORREÇÃO ---
@@ -234,7 +216,7 @@ const App = () => {
 
     // Next exercise
     const nextExercise = () => {
-        if (!currentLektion) return; // Proteção
+        if (!currentLektion) return; 
         
         const lektionId = currentLektion.id;
 
@@ -244,8 +226,7 @@ const App = () => {
             setUserAnswer('');
             setFeedback(null);
             
-            // --- CORREÇÃO CRÍTICA DE SINCRONIZAÇÃO (PROGRESSO) ---
-            // Usamos "dot notation" para atualizar APENAS o campo desta lição.
+            // --- CORREÇÃO (PROGRESSO) (v9 COMPAT) ---
             const progressUpdate = {
                 [`lektionProgress.${lektionId}`]: nextIndex
             };
@@ -264,23 +245,20 @@ const App = () => {
         setIsSaving(true); 
         
         const lektionId = currentLektion.id;
-        // Usamos o FieldValue 'arrayUnion' (v9) para garantir que a lição
-        // seja adicionada apenas uma vez, de forma atômica.
+        // ATUALIZADO v9 COMPAT: firebase.firestore.FieldValue.arrayUnion(lektionId)
         const completedUpdate = {
-            completedLektions: arrayUnion(lektionId) // v9
+            completedLektions: firebase.firestore.FieldValue.arrayUnion(lektionId) 
         };
-        await saveUserData(completedUpdate); // Salva a lição como completa
+        await saveUserData(completedUpdate); 
 
-        // --- CORREÇÃO CRÍTICA (MESMA DO nextExercise) ---
-        // Salva o progresso final desta lição usando "dot notation".
+        // ATUALIZADO v9 COMPAT: "dot notation"
         const progressUpdate = {
             [`lektionProgress.${lektionId}`]: currentLektion.exercises.length
         };
-        await saveUserData(progressUpdate); // Salva o progresso final
-        // --- FIM DA CORREÇÃO ---
+        await saveUserData(progressUpdate); 
         
         setIsSaving(false); 
-        setShowFinishModal(true); // Mostra o modal de sucesso
+        setShowFinishModal(true); 
     };
 
     // Chamada pelo botão no novo modal para fechar e navegar
@@ -895,4 +873,3 @@ const App = () => {
 
 // Render the app
 ReactDOM.render(<App />, document.getElementById('root'));
-
