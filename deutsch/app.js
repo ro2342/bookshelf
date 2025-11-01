@@ -745,7 +745,7 @@ function showGrammarModal() {
         return explanation ? `
             <div class="mb-6">
                 <h3 class="text-xl font-bold mb-3" style="color: var(--accent);">${explanation.title}</h3>
-                <div class="text-gray-300 whitespace-pre-line leading-relaxed">${explanation.content.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+                <div class="text-gray-300 whitespace-pre-line leading-relaxed break-words">${explanation.content}</div>
             </div>
         ` : `<p class="text-red-500">Erro: Tópico de gramática "${key}" não encontrado.</p>`;
     }).join('');
