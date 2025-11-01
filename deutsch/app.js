@@ -1,23 +1,43 @@
 // app.js - Aplicativo React Completo
 
 // Firebase Configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
-  authDomain: "deutsch-39779.firebaseapp.com",
-  projectId: "deutsch-39779",
-  storageBucket: "deutsch-39779.firebasestorage.app",
-  messagingSenderId: "672743327567",
-  appId: "1:672743327567:web:8875f89b1f282b7aba273a",
-  measurementId: "G-XYVLCZD740"
-};
+  const firebaseConfig = {
+    apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
+    authDomain: "deutsch-39779.firebaseapp.com",
+    projectId: "deutsch-39779",
+    storageBucket: "deutsch-39779.firebasestorage.app",
+    messagingSenderId: "672743327567",
+    appId: "1:672743327567:web:8875f89b1f282b7aba273a",
+    measurementId: "G-XYVLCZD740"
+  };
 
 
-// Initialize Firebase
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
-}
-const auth = firebase.auth();
-const db = firebase.firestore();
+// --- REFAKTOR CRÍTICO PARA O SDK v9+ (MODULAR) ---
+// Como o booktracker.js, usamos as funções modulares.
+// Como estamos no Babel (e não em um módulo JS nativo), puxamos do objeto global 'firebase'.
+
+// 1. Destrutura as funções principais
+const { initializeApp } = firebase.app;
+const { getAuth, onAuthStateChanged, signOut } = firebase.auth;
+const { 
+    getFirestore, 
+    doc, 
+    onSnapshot, 
+    updateDoc, 
+    setDoc, 
+    serverTimestamp, // Novo timestamp
+    increment,       // Nova função atômica (como no booktracker)
+    arrayUnion       // Nova função atômica (como no booktracker)
+} = firebase.firestore;
+
+// 2. Inicializa os serviços v9
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// As variáveis globais 'firebase.auth()' e 'firebase.firestore()' não são mais usadas.
+// --- FIM DA REFAKTOR ---
+
 
 // Main App Component
 const App = () => {
@@ -46,7 +66,8 @@ const App = () => {
     React.useEffect(() => {
         let unsubscribeFromFirestore = null; 
 
-        const unsubscribeFromAuth = auth.onAuthStateChanged(async (user) => {
+        // ATUALIZADO para a sintaxe v9: onAuthStateChanged(auth, ...)
+        const unsubscribeFromAuth = onAuthStateChanged(auth, async (user) => {
             if (user) {
                 setUser(user);
                 
@@ -54,12 +75,13 @@ const App = () => {
                     unsubscribeFromFirestore();
                 }
 
-                const docRef = db.collection('users').doc(user.uid);
+                // ATUALIZADO para a sintaxe v9: doc(db, 'collection', 'id')
+                const docRef = doc(db, 'users', user.uid);
                 
-                // O onSnapshot é a FONTE ÚNICA DE VERDADE.
-                // Ele atualiza o app sempre que os dados mudam no Firebase.
-                unsubscribeFromFirestore = docRef.onSnapshot(async (doc) => {
-                    if (doc.exists) {
+                // ATUALIZADO para a sintaxe v9: onSnapshot(docRef, ...)
+                // O onSnapshot é a "Fonte Única da Verdade"
+                unsubscribeFromFirestore = onSnapshot(docRef, async (doc) => {
+                    if (doc.exists()) {
                         const data = doc.data();
                         const dbTheme = data.theme || 'taylorSwift'; 
                         
@@ -76,9 +98,10 @@ const App = () => {
                             theme: 'taylorSwift', 
                             lektionProgress: {},
                             exerciseStats: {},
-                            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                            lastUpdated: serverTimestamp() // v9
                         };
-                        await docRef.set(newUserData);
+                        // ATUALIZADO para a sintaxe v9: setDoc(docRef, ...)
+                        await setDoc(docRef, newUserData);
                         localStorage.setItem('selectedTheme', 'taylorSwift'); 
                     }
                     setLoading(false);
@@ -114,19 +137,20 @@ const App = () => {
     }, [currentView, showMenu, showGrammar, feedback, loading, showFinishModal]); 
     
 
-    // --- CORREÇÃO CRÍTICA: saveUserData ---
+    // --- CORREÇÃO CRÍTICA: saveUserData (ATUALIZADA PARA v9) ---
     // Esta função AGORA SÓ FALA COM O FIREBASE.
     // Ela não chama mais o 'setUserData' localmente.
     // O 'onSnapshot' vai receber a mudança e atualizar o 'setUserData'.
     // Isso evita "race conditions" e garante a fonte única da verdade.
     const saveUserData = async (data) => {
-        if (!user || isSaving) return; // Proteção extra
+        if (!user) return; // Proteção contra salvamento antes do user carregar
         
         try {
-            // SÓ ATUALIZA O FIREBASE.
-            await db.collection('users').doc(user.uid).update({
+            // ATUALIZADO para a sintaxe v9: updateDoc(docRef, ...)
+            const docRef = doc(db, 'users', user.uid);
+            await updateDoc(docRef, {
                 ...data,
-                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                lastUpdated: serverTimestamp() // v9
             });
         } catch (error) {
             console.error('Error saving data:', error);
@@ -138,7 +162,8 @@ const App = () => {
     // Logout
     const handleLogout = async () => {
         try {
-            await auth.signOut();
+            // ATUALIZADO para a sintaxe v9: signOut(auth)
+            await signOut(auth);
         } catch (error) {
             console.error('Logout error:', error);
         }
@@ -155,10 +180,11 @@ const App = () => {
     // Start Lektion
     const startLektion = (lektionId) => {
         const lektion = window.exercisesData.find(l => l.id === lektionId);
-        if (lektion) {
-            const lektionProgress = userData?.lektionProgress || {};
+        if (lektion && userData) { // Garante que userData não é nulo
+            const lektionProgress = userData.lektionProgress || {};
             let startIndex = lektionProgress[lektionId] || 0;
 
+            // Se o progresso salvo for igual ou maior que o total, reinicia (para revisão)
             if (startIndex >= lektion.exercises.length) {
                 startIndex = 0;
             }
@@ -197,10 +223,9 @@ const App = () => {
 
         if (isCorrect) {
             // --- CORREÇÃO CRÍTICA DE SINCRONIZAÇÃO (SCORE) ---
-            // Usamos 'increment' para uma atualização atômica.
-            // Isso evita que duas respostas rápidas se sobrescrevam.
+            // Usamos 'increment' (v9) para uma atualização atômica.
             const scoreUpdate = {
-                score: firebase.firestore.FieldValue.increment(10)
+                score: increment(10) // v9
             };
             saveUserData(scoreUpdate);
             // --- FIM DA CORREÇÃO ---
@@ -209,6 +234,8 @@ const App = () => {
 
     // Next exercise
     const nextExercise = () => {
+        if (!currentLektion) return; // Proteção
+        
         const lektionId = currentLektion.id;
 
         if (currentExerciseIndex < currentLektion.exercises.length - 1) {
@@ -218,8 +245,7 @@ const App = () => {
             setFeedback(null);
             
             // --- CORREÇÃO CRÍTICA DE SINCRONIZAÇÃO (PROGRESSO) ---
-            // Usamos "dot notation" para atualizar APENAS o campo desta lição,
-            // em vez de sobrescrever o objeto 'lektionProgress' inteiro.
+            // Usamos "dot notation" para atualizar APENAS o campo desta lição.
             const progressUpdate = {
                 [`lektionProgress.${lektionId}`]: nextIndex
             };
@@ -238,10 +264,10 @@ const App = () => {
         setIsSaving(true); 
         
         const lektionId = currentLektion.id;
-        // Usamos o FieldValue 'arrayUnion' para garantir que a lição
+        // Usamos o FieldValue 'arrayUnion' (v9) para garantir que a lição
         // seja adicionada apenas uma vez, de forma atômica.
         const completedUpdate = {
-            completedLektions: firebase.firestore.FieldValue.arrayUnion(lektionId)
+            completedLektions: arrayUnion(lektionId) // v9
         };
         await saveUserData(completedUpdate); // Salva a lição como completa
 
@@ -254,7 +280,7 @@ const App = () => {
         // --- FIM DA CORREÇÃO ---
         
         setIsSaving(false); 
-        setShowFinishModal(true); 
+        setShowFinishModal(true); // Mostra o modal de sucesso
     };
 
     // Chamada pelo botão no novo modal para fechar e navegar
@@ -355,9 +381,36 @@ const App = () => {
 
             {/* Grammar Modal */}
             {showGrammar && <GrammarModal />}
-
-            {/* Lesson Finished Modal */}
-            {showFinishModal && <LessonFinishedModal />}
+            
+            {/* --- NOVO MODAL DE CONCLUSÃO --- */}
+            {showFinishModal && (
+                <div className="modal-overlay" onClick={handleCloseFinishModal}>
+                    <div 
+                        className="modal-content" 
+                        style={{ backgroundColor: theme.card, textAlign: 'center' }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ fontSize: '5rem', marginBottom: 20 }}>✅</div>
+                        <h2 style={{ fontSize: '1.8rem', marginBottom: 20, color: theme.primary }}>
+                            Lição Finalizada!
+                        </h2>
+                        <p style={{ fontSize: '1.1rem', opacity: 0.8, marginBottom: 30 }}>
+                            Seu progresso foi salvo com sucesso.
+                        </p>
+                        <button 
+                            className="btn-primary"
+                            onClick={handleCloseFinishModal}
+                            style={{ 
+                                width: '100%',
+                                background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
+                            }}
+                        >
+                            Voltar ao Mapa
+                        </button>
+                    </div>
+                </div>
+            )}
+            {/* --- FIM DO NOVO MODAL --- */}
         </div>
     );
 
@@ -365,33 +418,7 @@ const App = () => {
     function HomeView() {
         const totalLektions = window.exercisesData.length;
         const completedCount = userData?.completedLektions?.length || 0;
-        const progress = (completedCount / totalLektions) * 100;
-
-        const nextLektion = React.useCallback(() => {
-            const completed = userData?.completedLektions || [];
-            const progress = userData?.lektionProgress || {};
-
-            // 1. Procura por lições em progresso
-            for (const lektion of window.exercisesData) {
-                const lektionId = lektion.id;
-                const savedIndex = progress[lektionId] || 0;
-                if (savedIndex > 0 && savedIndex < lektion.exercises.length) {
-                    return lektion; 
-                }
-            }
-
-            // 2. Procura pela próxima lição não completada
-            for (const lektion of window.exercisesData) {
-                if (!completed.includes(lektion.id)) {
-                    return lektion; 
-                }
-            }
-            
-            // 3. Se tudo estiver completo, retorna a primeira
-            return window.exercisesData[0];
-        }, [userData]);
-
-        const lektionToStart = nextLektion();
+        const progress = totalLektions > 0 ? (completedCount / totalLektions) * 100 : 0;
 
         return (
             <div>
@@ -427,7 +454,7 @@ const App = () => {
 
                 <button 
                     className="btn-primary" 
-                    onClick={() => startLektion(lektionToStart.id)}
+                    onClick={() => setCurrentView('map')}
                     style={{ 
                         width: '100%',
                         padding: 20,
@@ -435,11 +462,7 @@ const App = () => {
                         background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                     }}
                 >
-                    {
-                        (userData?.lektionProgress && userData.lektionProgress[lektionToStart.id] > 0) ? 
-                        `Continuar: ${lektionToStart.title} →` :
-                        `Começar: ${lektionToStart.title} →`
-                    }
+                    Ir para Mapa de Aprendizado →
                 </button>
             </div>
         );
@@ -457,13 +480,9 @@ const App = () => {
                 
                 {window.exercisesData.map((lektion, index) => {
                     const isCompleted = completedLektions.includes(lektion.id);
-                    // Lição está travada se a anterior não estiver completa E não for a primeira lição
+                    // Lógica de "locked" original (precisa da lição anterior completa)
                     const isLocked = index > 0 && !completedLektions.includes(window.exercisesData[index - 1].id);
                     
-                    const lektionProgress = userData?.lektionProgress || {};
-                    const savedIndex = lektionProgress[lektion.id] || 0;
-                    const isInProgress = savedIndex > 0 && savedIndex < lektion.exercises.length;
-
                     return (
                         <div 
                             key={lektion.id}
@@ -494,7 +513,7 @@ const App = () => {
                                             color: theme.text
                                         }}
                                     >
-                                        {isCompleted ? 'Revisar' : (isInProgress ? 'Continuar' : 'Iniciar')}
+                                        {isCompleted ? 'Revisar' : 'Iniciar'}
                                     </button>
                                 )}
                             </div>
@@ -510,10 +529,7 @@ const App = () => {
         const totalLektions = window.exercisesData.length;
         const completedCount = userData?.completedLektions?.length || 0;
         const totalExercises = window.exercisesData.reduce((sum, l) => sum + l.exercises.length, 0);
-        const progress = (completedCount / totalLektions) * 100;
-
-        const lektionProgress = userData?.lektionProgress || {};
-        const exercisesDone = Object.values(lektionProgress).reduce((sum, count) => sum + count, 0);
+        const progress = totalLektions > 0 ? (completedCount / totalLektions) * 100 : 0;
 
         return (
             <div>
@@ -545,9 +561,9 @@ const App = () => {
 
                     <div className="card stat-card" style={{ backgroundColor: theme.card }}>
                         <div className="stat-number" style={{ color: theme.accent }}>
-                            {exercisesDone}/{totalExercises}
+                            {totalExercises}
                         </div>
-                        <div className="stat-label">Exercícios Feitos</div>
+                        <div className="stat-label">Total de Exercícios</div>
                     </div>
                 </div>
 
@@ -598,8 +614,9 @@ const App = () => {
         if (!currentLektion) return null;
 
         const exercise = currentLektion.exercises[currentExerciseIndex];
-        const progress = (currentExerciseIndex / currentLektion.exercises.length) * 100;
+        const progress = ((currentExerciseIndex + 1) / currentLektion.exercises.length) * 100;
 
+        // Auto-focus input when exercise changes
         React.useEffect(() => {
             if (inputRef.current && !feedback) {
                 inputRef.current.focus();
@@ -630,7 +647,7 @@ const App = () => {
                         <div 
                             className="progress-fill"
                             style={{ 
-                                width: `${progress}%`, 
+                                width: `${progress}%`,
                                 background: `linear-gradient(90deg, ${theme.primary}, ${theme.accent})`
                             }}
                         ></div>
@@ -709,12 +726,12 @@ const App = () => {
 
                     {feedback && (
                         <div className={`feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}`}>
-                            {feedback.isCorrect ? <i data-lucide="check" width="24" height="24"></i> : <i data-lucide="x" width="24" height="24"></i>}
+                            {feedback.isCorrect ? '✓' : '✗'}
                             <div>
                                 <div style={{ fontWeight: 700, marginBottom: 5 }}>
                                     {feedback.isCorrect ? 'Correto!' : 'Incorreto'}
                                 </div>
-                                <div>{feedback.explanation}</div>
+                                <div dangerouslySetInnerHTML={{ __html: feedback.explanation }} />
                             </div>
                         </div>
                     )}
@@ -739,19 +756,17 @@ const App = () => {
                                     onClick={() => setShowGrammar(true)}
                                     style={{ borderColor: theme.primary }}
                                 >
-                                    <i data-lucide="book-open" width="18" height="18" style={{ verticalAlign: 'middle', marginRight: 5 }}></i>
-                                    Gramática
+                                    📚 Gramática
                                 </button>
                             </>
                         ) : (
                             <button 
                                 className="btn-primary"
-                                onClick={nextExercise} 
-                                disabled={isSaving} 
+                                onClick={nextExercise}
+                                disabled={isSaving} // Desabilita o botão enquanto salva
                                 style={{ 
                                     flex: 1,
-                                    background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`,
-                                    opacity: isSaving ? 0.7 : 1 
+                                    background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                                 }}
                             >
                                 {isSaving ? 'Salvando...' : (currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉')}
@@ -837,18 +852,9 @@ const App = () => {
                     style={{ backgroundColor: theme.card }}
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                        <h2 style={{ fontSize: '1.8rem', color: theme.primary }}>
-                            Gramática 📚
-                        </h2>
-                        <button 
-                            className="menu-btn"
-                            onClick={() => setShowGrammar(false)}
-                            style={{ color: theme.text }}
-                        >
-                            <i data-lucide="x" width="28" height="28"></i>
-                        </button>
-                    </div>
+                    <h2 style={{ fontSize: '1.8rem', marginBottom: 20, color: theme.primary }}>
+                        Explicações Gramaticais 📚
+                    </h2>
 
                     {currentLektion.grammarKeys.map(key => {
                         const explanation = window.grammarExplanations[key];
@@ -857,12 +863,13 @@ const App = () => {
                                 <h3 style={{ fontSize: '1.3rem', marginBottom: 10, color: theme.accent }}>
                                     {explanation.title}
                                 </h3>
+                                {/* Usando dangerouslySetInnerHTML para renderizar o HTML */}
                                 <div 
                                     style={{ 
                                         lineHeight: 1.6,
                                         opacity: 0.9
                                     }}
-                                    dangerouslySetInnerHTML={{ __html: explanation.content.replace(/\n/g, '<br />') }}
+                                    dangerouslySetInnerHTML={{ __html: explanation.content }}
                                 >
                                 </div>
                             </div>
@@ -878,42 +885,7 @@ const App = () => {
                             background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                         }}
                     >
-                        Entendi, fechar
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    // Lesson Finished Modal
-    function LessonFinishedModal() {
-        return (
-            <div className="modal-overlay">
-                <div 
-                    className="modal-content" 
-                    style={{ 
-                        backgroundColor: theme.card,
-                        textAlign: 'center',
-                        padding: '40px'
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <div style={{ fontSize: '4rem', marginBottom: 20 }}>✅</div>
-                    <h2 style={{ fontSize: '1.8rem', marginBottom: 20, color: theme.primary }}>
-                        Lição Finalizada!
-                    </h2>
-                    <p style={{ opacity: 0.8, marginBottom: 30, fontSize: '1.1rem' }}>
-                        Ótimo trabalho! Seu progresso foi salvo.
-                    </p>
-                    <button 
-                        className="btn-primary"
-                        onClick={handleCloseFinishModal} 
-                        style={{ 
-                            width: '100%',
-                            background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
-                        }}
-                    >
-                        Voltar ao Mapa
+                        Fechar
                     </button>
                 </div>
             </div>
