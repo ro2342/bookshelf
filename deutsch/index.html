@@ -215,19 +215,34 @@
                 const result = await auth.signInWithPopup(provider);
                 const user = result.user;
 
-                // Save user data to Firestore
-                // ATUALIZADO: Adicionado lektionProgress para inicializar o progresso
-                await db.collection('users').doc(user.uid).set({
-                    email: user.email,
-                    displayName: user.displayName,
-                    theme: selectedTheme,
-                    lektionProgress: {}, // <-- NOVO: Inicializa o objeto de progresso
-                    score: 0,
-                    completedLektions: [],
-                    lastLogin: firebase.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
+                // *** INÍCIO DA CORREÇÃO ***
+                // 1. Referencia o documento do usuário
+                const docRef = db.collection('users').doc(user.uid);
+                
+                // 2. Verifica se o documento já existe
+                const doc = await docRef.get();
 
-                // Save theme to localStorage for quick access
+                if (!doc.exists) {
+                    // 3. SE NÃO EXISTIR (Novo Usuário): Cria o documento com os padrões
+                    await docRef.set({
+                        email: user.email,
+                        displayName: user.displayName,
+                        theme: selectedTheme, // Usa o tema selecionado nesta página
+                        lektionProgress: {},
+                        score: 0,
+                        completedLektions: [],
+                        lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                } else {
+                    // 4. SE EXISTIR (Usuário Existente): Atualiza *apenas* o último login
+                    //    Isso *impede* que o progresso e o tema sejam sobrescritos.
+                    await docRef.update({
+                        lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+                    });
+                }
+                // *** FIM DA CORREÇÃO ***
+
+                // Save theme to localStorage for quick access (isso é local, não afeta o DB)
                 localStorage.setItem('selectedTheme', selectedTheme);
 
                 // Redirect to app
@@ -251,3 +266,4 @@
     </script>
 </body>
 </html>
+
