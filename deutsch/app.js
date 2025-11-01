@@ -1,9 +1,9 @@
 // app.js - Lógica principal do App Deutsch A1.1 (Vanilla JS)
-// ATUALIZAÇÃO: Implementa a barra de navegação "Liquid Glass"
+// CORREÇÃO: Exercícios agora são uma PÁGINA CHEIA, não um modal.
 
 // Importações do Firebase (SDK 9 modular)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-import { getFirestore, doc, onSnapshot, setDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+import { getFirestore, doc, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { getAuth, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
 // --- CONFIGURAÇÃO E INICIALIZAÇÃO ---
@@ -26,17 +26,17 @@ let profileUnsubscribe = () => {};
 let userProfile = {
     score: 0,
     completedLektions: [],
-    inProgressLektions: {}, // Salva o progresso no meio da lição
     theme: 'taylorSwift',
     name: 'Estudante',
     avatarUrl: ''
 };
 let currentTheme = 'taylorSwift';
 
-// ATUALIZAÇÃO: Deixamos de definir "|| []" aqui para que a verificação funcione
-const allLektions = window.exercisesData;
-const allGrammar = window.grammarExplanations;
-const allThemes = window.themes;
+// Dados estáticos (carregados pelos scripts no app.html)
+// Se os arquivos JS não carregarem, estes serão arrays/objetos vazios.
+const allLektions = window.exercisesData || [];
+const allGrammar = window.grammarExplanations || {};
+const allThemes = window.themes || {};
 
 // Variáveis de estado do exercício
 let currentLektion = null;
@@ -46,15 +46,12 @@ let feedback = null;
 
 // --- FUNÇÃO DE AJUDA PARA ÍCONES ---
 /**
- * Executa o lucide.createIcons() de forma segura.
+ * Executa o lucide.createIcons() de forma segura, evitando erros
+ * caso a biblioteca de ícones falhe ao carregar.
  */
 function safeCreateIcons() {
     if (window.lucide) {
-        try {
-            lucide.createIcons();
-        } catch (error) {
-            console.warn("Erro ao criar ícones Lucide:", error.message);
-        }
+        lucide.createIcons();
     } else {
         console.warn('Biblioteca de ícones (Lucide) não carregou a tempo.');
     }
@@ -65,41 +62,11 @@ function safeCreateIcons() {
 
 function initFirebase() {
     try {
-        // --- NOVA VERIFICAÇÃO DE DADOS (MAIS CEDO) ---
-        // Verificamos se os scripts globais carregaram ANTES de fazer qualquer coisa.
-        if (!allThemes || Object.keys(allThemes).length === 0) {
-            document.body.innerHTML = `<div style="padding: 20px; font-family: sans-serif; color: #111;">
-                <h1>Erro Crítico de Carregamento</h1>
-                <p>O ficheiro <strong>themes.js</strong> não foi carregado ou está vazio.</p>
-                <p>Por favor, verifique se o ficheiro existe e se o nome em <code>app.html</code> está correto.</p>
-            </div>`;
-            console.error("ERRO: themes.js não carregou. 'window.themes' está indefinido ou vazio.");
-            return; // Para a execução
-        }
-        if (!allLektions || allLektions.length === 0) {
-            document.body.innerHTML = `<div style="padding: 20px; font-family: sans-serif; color: #111;">
-                <h1>Erro Crítico de Carregamento</h1>
-                <p>O ficheiro <strong>exercisesData.js</strong> não foi carregado ou está vazio.</p>
-                <p>Por favor, verifique se o ficheiro existe e se o nome em <code>app.html</code> está correto.</p>
-            </div>`;
-            console.error("ERRO: exercisesData.js não carregou. 'window.exercisesData' está indefinido ou vazio.");
-            return; // Para a execução
-        }
-         if (!allGrammar || Object.keys(allGrammar).length === 0) {
-            document.body.innerHTML = `<div style="padding: 20px; font-family: sans-serif; color: #111;">
-                <h1>Erro Crítico de Carregamento</h1>
-                <p>O ficheiro <strong>grammarExplanations.js</strong> não foi carregado ou está vazio.</p>
-                <p>Por favor, verifique se o ficheiro existe e se o nome em <code>app.html</code> está correto.</p>
-            </div>`;
-            console.error("ERRO: grammarExplanations.js não carregou. 'window.grammarExplanations' está indefinido ou vazio.");
-            return; // Para a execução
-        }
-        // --- FIM DA NOVA VERIFICAÇÃO ---
-
         app = initializeApp(firebaseConfig);
         db = getFirestore(app);
         auth = getAuth(app);
         
+        // Pega o tema salvo no localStorage (se houver) para evitar flash
         const savedTheme = localStorage.getItem('deutschAppTheme');
         if (savedTheme && allThemes[savedTheme]) {
             applyTheme(savedTheme, false);
@@ -107,41 +74,29 @@ function initFirebase() {
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
+                // Usuário está logado
                 userId = user.uid;
                 localStorage.setItem('deutschAppUserId', userId);
-                initializeAppLogic();
+                initializeAppLogic(); // <--- Inicia o app
             } else {
+                // Usuário não está logado
                 localStorage.removeItem('deutschAppUserId');
-                window.location.href = 'index.html';
+                window.location.href = 'index.html'; // Redireciona para o login
             }
         });
 
     } catch (error) {
         console.error("Erro ao inicializar Firebase:", error);
-        document.body.innerHTML = `<h1>Erro crítico ao carregar o Firebase. Verifique o console.</h1><p>${error.message}</p>`;
+        document.body.innerHTML = `<h1>Erro crítico ao carregar o Firebase. Verifique o console e tente recarregar a página.</h1><p>${error.message}</p>`;
     }
 }
 
 // Inicia a lógica principal do app
 function initializeAppLogic() {
-    try {
-        console.log("App lógico iniciado para o usuário:", userId);
-        
-        // ATUALIZAÇÃO: Adiciona CSS dinâmico para legibilidade dos temas
-        const styleSheet = document.createElement("style");
-        styleSheet.type = "text/css";
-        styleSheet.innerText = `.text-secondary { color: var(--text); opacity: 0.7; }`;
-        document.head.appendChild(styleSheet);
-        
-        listenToProfile();
-        window.addEventListener('hashchange', router);
-        
-        // Adiciona o listener para o "popstate" (botão de voltar do navegador)
-        window.addEventListener('popstate', router);
-    } catch (error) {
-        console.error("Erro fatal no initializeAppLogic:", error);
-        document.body.innerHTML = `<h1>Erro fatal ao iniciar o app.</h1><p>${error.message}</p>`;
-    }
+    console.log("App lógico iniciado para o usuário:", userId);
+    // Esconde o loader SÓ DEPOIS que os dados do perfil carregarem (movido para listenToProfile)
+    listenToProfile(); // Começa a ouvir os dados do usuário
+    window.addEventListener('hashchange', router); // Ouve mudanças no hash (navegação)
 }
 
 // --- SISTEMA DE TEMAS (Inspirado no BookTracker) ---
@@ -160,19 +115,13 @@ function applyTheme(themeName, saveToDb = true) {
     document.documentElement.style.setProperty('--card', theme.card);
     document.documentElement.style.setProperty('--text', theme.text);
     document.documentElement.style.setProperty('--border', theme.border);
-    
-    // ATUALIZAÇÃO: Constrói o rgba() em JS para garantir a transparência
-    const cardRgb = theme['card-rgb'] || '240, 230, 255';
-    const borderRgb = theme['border-rgb'] || '216, 195, 232';
-    document.documentElement.style.setProperty('--card-bg-transparent', `rgba(${cardRgb}, 0.7)`);
-    document.documentElement.style.setProperty('--border-bg-transparent', `rgba(${borderRgb}, 0.5)`);
-
 
     currentTheme = themeName;
     localStorage.setItem('deutschAppTheme', themeName);
 
+    // Salva a preferência no Firestore
     if (saveToDb && userId) {
-        saveProfileData({ theme: themeName }, false);
+        saveProfileData({ theme: themeName }, false); // Salva sem mostrar loading
     }
 }
 
@@ -180,63 +129,46 @@ function applyTheme(themeName, saveToDb = true) {
 
 // Ouve as mudanças no perfil do usuário
 function listenToProfile() {
-    if (profileUnsubscribe) profileUnsubscribe();
+    if (profileUnsubscribe) profileUnsubscribe(); // Cancela o listener anterior
     if (!userId) return;
 
     const profileDocRef = doc(db, "users", userId, "profile", "data");
     
-    profileUnsubscribe = onSnapshot(profileDocRef, (docSnap) => {
-        // ATUALIZAÇÃO: Envolvemos tudo num try...catch
-        try {
-            const googleUser = auth.currentUser;
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                userProfile = {
-                    ...userProfile, // Mantém padrões
-                    ...data, // Sobrescreve com dados do FB
-                    name: data.name || googleUser?.displayName || 'Estudante',
-                    avatarUrl: data.avatarUrl || googleUser?.photoURL || ''
-                };
-                console.log("Perfil do usuário carregado:", userProfile);
-            } else {
-                console.log("Nenhum perfil encontrado, criando um novo...");
-                userProfile = {
-                    score: 0,
-                    completedLektions: [],
-                    inProgressLektions: {},
-                    theme: 'taylorSwift',
-                    name: googleUser?.displayName || 'Estudante',
-                    avatarUrl: googleUser?.photoURL || '',
-                    uid: userId,
-                    email: googleUser?.email || ''
-                };
-                // Usa setDoc para criar o documento
-                saveProfileData(userProfile, false); 
-            }
-            
-            applyTheme(userProfile.theme || 'taylorSwift', false);
-            
-            // Garante que o loader existe antes de o esconder
-            const loader = document.getElementById('page-loader');
-            if (loader) {
-                loader.classList.add('hidden');
-            }
-            router(); // Roda o router pela primeira vez
-        } catch (error) {
-             console.error("Erro dentro do 'onSnapshot' (provavelmente de renderização):", error);
-             document.getElementById('page-loader').innerHTML = `<p class="text-red-500">Erro ao processar dados do perfil: ${error.message}</p>`;
+    profileUnsubscribe = onSnapshot(profileDocRef, (doc) => {
+        const googleUser = auth.currentUser;
+        if (doc.exists()) {
+            const data = doc.data();
+            userProfile = {
+                ...userProfile, // Mantém padrões
+                ...data, // Sobrescreve com dados do FB
+                name: data.name || googleUser?.displayName || 'Estudante',
+                avatarUrl: data.avatarUrl || googleUser?.photoURL || ''
+            };
+            console.log("Perfil do usuário carregado:", userProfile);
+        } else {
+            // Se não existe, cria um perfil básico
+            console.log("Nenhum perfil encontrado, criando um novo...");
+            userProfile = {
+                score: 0,
+                completedLektions: [],
+                theme: 'taylorSwift',
+                name: googleUser?.displayName || 'Estudante',
+                avatarUrl: googleUser?.photoURL || '',
+                uid: userId,
+                email: googleUser?.email || ''
+            };
+            saveProfileData(userProfile, false); // Salva o novo perfil
         }
+        
+        // Aplica o tema carregado do perfil
+        applyTheme(userProfile.theme || 'taylorSwift', false);
+        
+        // **IMPORTANTE**: Esconde o loader e renderiza a página SÓ AGORA
+        document.getElementById('page-loader').classList.add('hidden');
+        router(); 
     }, (error) => {
-        console.error("Erro ao ouvir perfil (Erro de Firestore):", error);
-        // ATUALIZAÇÃO: Mensagem de erro mais clara
-        const loader = document.getElementById('page-loader');
-        if(loader) {
-            loader.innerHTML = `<div class="p-4 text-red-700 bg-red-100 rounded-lg">
-                <h3 class="font-bold">Erro de Banco de Dados</h3>
-                <p>Não foi possível carregar seu perfil. Verifique suas regras de segurança do Firestore.</p>
-                <p class="text-sm mt-2">Erro: ${error.message}</p>
-            </div>`;
-        }
+        console.error("Erro ao ouvir perfil:", error);
+        document.getElementById('page-loader').innerHTML = `<p class="text-red-500">Erro ao carregar perfil: ${error.message}</p>`;
     });
 }
 
@@ -248,42 +180,38 @@ async function saveProfileData(dataToSave, showLoadingFeedback = true) {
     if (showLoadingFeedback) showLoading("Salvando...");
 
     try {
-        // Usa setDoc com merge: true para criar ou atualizar
         await setDoc(profileDocRef, {
             ...dataToSave,
             lastUpdated: serverTimestamp()
-        }, { merge: true }); 
+        }, { merge: true }); // Merge: true para não apagar dados existentes
         
         if (showLoadingFeedback) hideModal();
         console.log("Dados salvos com sucesso:", dataToSave);
-    } catch (error)
-    {
+    } catch (error) {
         console.error("Erro ao salvar dados do perfil:", error);
         if (showLoadingFeedback) hideModal();
         showModal("Erro ao Salvar", `Não foi possível salvar seu progresso: ${error.message}`);
     }
 }
 
-// --- SISTEMA DE MODAL (Gramática, Loading) ---
+// --- SISTEMA DE MODAL (AGORA SÓ PARA GRAMÁTICA/LOADING) ---
 
 const modalContainer = document.getElementById('modal-container');
 const modalContent = document.getElementById('modal-content');
 
-function showModal(title, contentHtml) {
-    if (!modalContent) return; // Segurança
-    // ATUALIZAÇÃO: O estilo agora é controlado pelo CSS
+function showModal(title, contentHtml, maxWidth = '600px') {
     modalContent.innerHTML = `
-        <button id="modal-close-btn">
-            <i data-lucide="x" class="w-5 h-5"></i>
+        <button id="modal-close-btn" class="modal-close-btn">
+            <i data-lucide="x" class="w-6 h-6"></i>
         </button>
-        <div id="modal-body" class="mt-4">
-             <h3 class="text-xl font-bold mb-4" style="color: var(--primary);">${title}</h3>
-            ${contentHtml}
-        </div>
+        <h2 class="text-2xl font-bold mb-6" style="color: var(--primary);">${title}</h2>
+        <div id="modal-body">${contentHtml}</div>
     `;
+    modalContent.style.maxWidth = maxWidth;
     modalContainer.classList.remove('hidden');
-    safeCreateIcons();
+    safeCreateIcons(); // Recria ícones dentro do modal
 
+    // Adiciona listeners
     modalContainer.addEventListener('click', hideModal);
     modalContent.addEventListener('click', (e) => e.stopPropagation());
     document.getElementById('modal-close-btn').addEventListener('click', hideModal);
@@ -291,8 +219,14 @@ function showModal(title, contentHtml) {
 }
 
 function hideModal() {
-    if (modalContainer) modalContainer.classList.add('hidden');
-    if (modalContent) modalContent.innerHTML = '';
+    modalContainer.classList.add('hidden');
+    modalContent.innerHTML = '';
+    
+    // REMOVIDO: Lógica de voltar ao mapa, pois o modal não é mais para lições
+    // if (window.location.hash.startsWith('#/lektion/')) {
+    //     window.location.hash = '#/map';
+    // }
+
     document.removeEventListener('keydown', handleEscKey);
 }
 
@@ -303,25 +237,28 @@ function handleEscKey(event) {
 }
 
 function showLoading(message = 'Carregando...') {
-    if (!modalContainer || !modalContent) return; // Segurança
-    // Usa o mesmo estilo de modal para consistência
     modalContent.innerHTML = `
-        <div class="flex flex-col items-center justify-center p-8 text-center" style="color: var(--text);">
-            <svg class="animate-spin h-8 w-8 mb-4" style="color: var(--primary);" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <div class="flex flex-col items-center justify-center p-8 text-center">
+            <svg class="animate-spin h-8 w-8 text-white mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
             <p class="text-lg font-medium">${message}</p>
         </div>
     `;
+    modalContent.style.maxWidth = '300px';
     modalContainer.classList.remove('hidden');
     
+    // Remove listeners de fechar
     modalContainer.removeEventListener('click', hideModal);
     document.removeEventListener('keydown', handleEscKey);
 }
 
+
+
 // --- ROUTER (Inspirado no BookTracker) ---
 
+// ADICIONADO 'exercise' às páginas
 const pages = ['home', 'map', 'progress', 'settings', 'exercise'];
 
 function hideAllPages() {
@@ -329,100 +266,74 @@ function hideAllPages() {
         const pageEl = document.getElementById(`page-${pageId}`);
         if (pageEl) pageEl.classList.add('hidden');
     });
+    // Não mexemos no loader aqui, ele é controlado pelo listenToProfile
 }
 
 function router() {
-    if (!userId) return; 
+    if (!userId) return; // Não faz nada se os dados do usuário ainda não carregaram
 
-    try {
-        const currentHash = window.location.hash || '#/home';
-        const [path] = currentHash.substring(2).split('/');
-        
-        if (path === 'menu') {
-            // Lógica de menu modal (se necessário)
-            return;
-        }
+    const currentHash = window.location.hash || '#/home';
+    const [path, param] = currentHash.substring(2).split('/');
 
-        if (modalContainer && !modalContainer.classList.contains('hidden')) {
-            hideModal();
-        }
-
-        hideAllPages();
-        updateNavLinks(path || 'home'); // ATUALIZADO: Passa só o 'path'
-
-        const targetPage = document.getElementById(`page-${path}`);
-        if (targetPage) {
-            targetPage.classList.remove('hidden');
-            switch (path) {
-                case 'home': renderHome(); break;
-                case 'map': renderMap(); break;
-                case 'progress': renderProgress(); break;
-                case 'settings': renderSettings(); break;
-                case 'exercise': renderExercisePage(); break;
-                default:
-                    document.getElementById('page-home').classList.remove('hidden');
-                    renderHome();
-            }
-        } else {
-            document.getElementById('page-home').classList.remove('hidden');
-            renderHome();
-        }
-        
-        safeCreateIcons();
-    } catch (error) {
-        console.error("Erro fatal no router:", error);
-        document.getElementById('page-loader').innerHTML = `<p class="text-red-500">Erro ao navegar para a página: ${error.message}</p>`;
-        document.getElementById('page-loader').classList.remove('hidden');
+    // REMOVIDA Rota de Modal para 'lektion'
+    
+    if (path === 'menu') {
+        renderMenuInModal(); // AINDA PODE SER USADO PARA UM MENU FUTURO
+        return;
     }
+
+    // Se nenhuma rota de modal foi ativada, garante que o modal esteja fechado
+    if (!modalContainer.classList.contains('hidden')) {
+        hideModal();
+    }
+
+    // Rotas de Página
+    hideAllPages();
+    updateNavLinks(currentHash);
+
+    const targetPage = document.getElementById(`page-${path}`);
+    if (targetPage) {
+        targetPage.classList.remove('hidden');
+        switch (path) {
+            case 'home': renderHome(); break;
+            case 'map': renderMap(); break;
+            case 'progress': renderProgress(); break;
+            case 'settings': renderSettings(); break;
+            // ADICIONADA Rota para a página de exercício
+            case 'exercise': renderExercisePage(); break;
+            default:
+                document.getElementById('page-home').classList.remove('hidden');
+                renderHome();
+        }
+    } else {
+        // Fallback para home
+        document.getElementById('page-home').classList.remove('hidden');
+        renderHome();
+    }
+    
+    safeCreateIcons(); // Atualiza ícones na página
 }
 
-// --- ATUALIZAÇÃO: LÓGICA DA BARRA DE NAVEGAÇÃO "LIQUID GLASS" ---
-
-function updateNavLinks(activePath) {
-    const navContainer = document.querySelector('.liquid-nav');
-    if (!navContainer) return;
-
-    let activeLinkEl = null;
-
-    // 1. Remove a classe 'active' de todos e encontra o link ativo
+function updateNavLinks(activeHash) {
     document.querySelectorAll('.nav-link').forEach(link => {
-        link.classList.remove('active');
-        if (link.dataset.linkId === activePath) {
-            activeLinkEl = link;
+        const linkHash = new URL(link.href, window.location.origin).hash;
+        
+        // Trata o caso da página de exercício (nenhum nav deve estar ativo)
+        if (activeHash.startsWith('#/exercise')) {
+             link.classList.remove('active');
+             link.classList.add('text-gray-400');
+             return;
+        }
+
+        if (linkHash === activeHash) {
             link.classList.add('active');
+            link.classList.remove('text-gray-400');
+        } else {
+            link.classList.remove('active');
+            link.classList.add('text-gray-400');
         }
     });
-
-    // 2. Move a pílula líquida
-    moveLiquidPill(activeLinkEl);
 }
-
-function moveLiquidPill(activeLinkEl) {
-    const liquidPill = document.getElementById('nav-liquid-pill');
-    const navContainer = document.querySelector('.liquid-nav');
-    
-    if (!liquidPill || !navContainer) return;
-
-    if (activeLinkEl) {
-        // ATUALIZAÇÃO: Damos um pequeno atraso para o navegador calcular o layout
-        setTimeout(() => {
-            const navRect = navContainer.getBoundingClientRect();
-            const linkRect = activeLinkEl.getBoundingClientRect();
-            
-            // Calcula a posição da pílula relativa ao container
-            const pillLeft = linkRect.left - navRect.left;
-            const pillWidth = linkRect.width;
-
-            liquidPill.style.left = `${pillLeft}px`;
-            liquidPill.style.width = `${pillWidth}px`;
-            liquidPill.style.opacity = '1';
-        }, 0); // 0ms é suficiente para 'empurrar' para a próxima frame
-    } else {
-        // Esconde a pílula se nenhuma rota estiver ativa (ex: #/exercise)
-        liquidPill.style.opacity = '0';
-    }
-}
-
 
 // --- RENDERIZAÇÃO DE PÁGINAS ---
 
@@ -433,7 +344,7 @@ function getPageHeader(title) {
             <img src="${avatarUrl}" alt="Avatar" class="w-16 h-16 rounded-full object-cover shadow-lg border-2" style="border-color: var(--primary);">
             <div>
                 <h1 class="font-bold text-3xl md:text-4xl">${title}</h1>
-                <p class="text-lg text-secondary">Olá, ${userProfile.name.split(' ')[0]}!</p>
+                <p class="text-lg text-gray-400">Olá, ${userProfile.name.split(' ')[0]}!</p>
             </div>
         </div>
     `;
@@ -441,30 +352,40 @@ function getPageHeader(title) {
 
 function renderHome() {
     const page = document.getElementById('page-home');
-    if (!page) return; // Segurança
     const completedCount = userProfile.completedLektions?.length || 0;
-    const totalLektions = allLektions.length; // Já sabemos que não é 0
+    const totalLektions = allLektions.length;
     
+    if (totalLektions === 0) {
+        page.innerHTML = `
+            ${getPageHeader('Início')}
+            <div class="card p-6 text-center">
+                <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
+                <p class="text-gray-300">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
+            </div>
+        `;
+        return;
+    }
+
     const progress = totalLektions > 0 ? (completedCount / totalLektions) * 100 : 0;
 
     page.innerHTML = `
         ${getPageHeader('Início')}
         <div class="card p-6 mb-6">
             <h2 class="text-xl font-bold mb-4">Bem-vindo(a) de volta!</h2>
-            <p class="text-secondary mb-6">Continue de onde parou. Seu progresso é salvo automaticamente na nuvem.</p>
-            <button id="go-to-map-btn" class="btn-primary w-full text-lg py-3 rounded-xl font-semibold">
+            <p class="text-gray-300 mb-6">Continue de onde parou. Seu progresso é salvo automaticamente na nuvem.</p>
+            <button id="go-to-map-btn" class="btn-primary w-full text-lg">
                 Ir para o Mapa de Aulas →
             </button>
         </div>
         
         <div class="card p-6">
             <h2 class="text-xl font-bold mb-4">Seu Progresso</h2>
-            <div class="mb-2 flex justify-between font-medium text-secondary">
+            <div class="mb-2 flex justify-between font-medium text-gray-300">
                 <span>Lições Completas</span>
                 <span>${completedCount} / ${totalLektions}</span>
             </div>
-            <div class="progress-bar h-2.5 rounded-full mb-4">
-                <div class="progress-fill h-2.5 rounded-full" style="width: ${progress}%;"></div>
+            <div class="progress-bar mb-4">
+                <div class="progress-fill" style="width: ${progress}%;"></div>
             </div>
             <div class="text-center text-2xl font-bold" style="color: var(--primary);">${Math.round(progress)}%</div>
         </div>
@@ -475,47 +396,54 @@ function renderHome() {
 
 function renderMap() {
     const page = document.getElementById('page-map');
-    if (!page) return; // Segurança
     const completed = userProfile.completedLektions || [];
-    const inProgress = userProfile.inProgressLektions || {};
 
+    if (allLektions.length === 0) {
+        page.innerHTML = `
+            ${getPageHeader('Mapa de Aprendizado')}
+            <div class="card p-6 text-center">
+                <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
+                <p class="text-gray-300">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
+            </div>
+        `;
+        return;
+    }
+    
     page.innerHTML = `
         ${getPageHeader('Mapa de Aprendizado')}
         <div class="space-y-4">
             ${allLektions.map((lektion, index) => {
                 const isCompleted = completed.includes(lektion.id);
-                const isInProgress = Object.keys(inProgress).includes(String(lektion.id));
+                // A primeira lição está sempre desbloqueada.
+                // As seguintes são desbloqueadas se a anterior foi completada.
                 const isLocked = index > 0 && !completed.includes(allLektions[index - 1].id);
-                
-                let icon = index + 1;
-                if (isLocked) icon = '<i data-lucide="lock" class="w-6 h-6"></i>';
-                else if (isCompleted) icon = '<i data-lucide="check" class="w-6 h-6"></i>';
-                else if (isInProgress) icon = '<i data-lucide="play" class="w-6 h-6 fill-current"></i>';
                 
                 return `
                     <div 
                         id="lektion-${lektion.id}"
-                        class="card p-5 flex items-center gap-4 lektion-card ${isLocked ? 'locked' : 'cursor-pointer transition-transform transform hover:-translate-y-1'}"
+                        class="card p-5 flex items-center gap-4 lektion-card ${isLocked ? 'locked' : 'cursor-pointer hover:bg-gray-800'}"
                         data-lektion-id="${lektion.id}"
                     >
-                        <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl" style="background-color: ${isLocked ? 'var(--border)' : (isCompleted ? '#28a745' : 'var(--primary)')}; color: white;">
-                            ${icon}
+                        <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl" style="background-color: ${isLocked ? 'var(--border)' : 'var(--primary)'}; color: ${isLocked ? 'var(--text-opacity-50)' : 'white'};">
+                            ${isLocked ? '<i data-lucide="lock" class="w-6 h-6"></i>' : (isCompleted ? '<i data-lucide="check" class="w-6 h-6"></i>' : index + 1)}
                         </div>
                         <div class="flex-grow">
                             <h3 class="text-lg font-bold">${lektion.title}</h3>
-                            <p class="text-sm text-secondary">${lektion.topics.join(', ')}</p>
+                            <p class="text-sm text-gray-400">${lektion.topics.join(', ')}</p>
                         </div>
-                        ${!isLocked ? '<i data-lucide="chevron-right" class="w-6 h-6 text-secondary"></i>' : ''}
+                        ${!isLocked ? '<i data-lucide="chevron-right" class="w-6 h-6 text-gray-500"></i>' : ''}
                     </div>
                 `;
             }).join('')}
         </div>
     `;
 
+    // Adiciona event listeners para os cards de lição
     document.querySelectorAll('.lektion-card:not(.locked)').forEach(card => {
         card.onclick = () => {
-            const lektionId = parseInt(card.dataset.lektionId);
-            startLektion(lektionId);
+            const lektionId = card.dataset.lektionId;
+            // MUDADO: Chama a função startLektion em vez de mudar o hash
+            startLektion(parseInt(lektionId));
         };
     });
     
@@ -524,7 +452,6 @@ function renderMap() {
 
 function renderProgress() {
     const page = document.getElementById('page-progress');
-    if (!page) return; // Segurança
     const completedCount = userProfile.completedLektions?.length || 0;
     const totalLektions = allLektions.length;
     const score = userProfile.score || 0;
@@ -533,14 +460,14 @@ function renderProgress() {
         ${getPageHeader('Progresso')}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="card p-6 text-center">
-                <h2 class="text-lg font-medium text-secondary mb-2">Pontos Totais</h2>
+                <h2 class="text-lg font-medium text-gray-400 mb-2">Pontos Totais</h2>
                 <div class="text-5xl font-bold" style="color: var(--primary);">${score}</div>
-                <i data-lucide="award" class="w-12 h-12 mx-auto mt-4 text-secondary"></i>
+                <i data-lucide="award" class="w-12 h-12 mx-auto mt-4 text-gray-500"></i>
             </div>
             <div class="card p-6 text-center">
-                <h2 class="text-lg font-medium text-secondary mb-2">Lições Completas</h2>
+                <h2 class="text-lg font-medium text-gray-400 mb-2">Lições Completas</h2>
                 <div class="text-5xl font-bold" style="color: var(--accent);">${completedCount} / ${totalLektions || 'N/A'}</div>
-                <i data-lucide="check-circle" class="w-12 h-12 mx-auto mt-4 text-secondary"></i>
+                <i data-lucide="check-circle" class="w-12 h-12 mx-auto mt-4 text-gray-500"></i>
             </div>
             <div class="card p-6 md:col-span-2">
                 <h2 class="text-xl font-bold mb-4">Lições Completadas</h2>
@@ -548,11 +475,11 @@ function renderProgress() {
                     <ul class="space-y-3">
                         ${userProfile.completedLektions.map(id => {
                             const lektion = allLektions.find(l => l.id === id);
-                            return lektion ? `<li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-green-500"></i> ${lektion.title}</li>` : '';
+                            return lektion ? `<li class="flex items-center gap-3 text-gray-300"><i data-lucide="check" class="w-5 h-5 text-green-500"></i> ${lektion.title}</li>` : '';
                         }).join('')}
                     </ul>
                 ` : `
-                    <p class="text-secondary text-center py-4">Você ainda não completou nenhuma lição.</p>
+                    <p class="text-gray-400 text-center py-4">Você ainda não completou nenhuma lição. Vá para o Mapa para começar!</p>
                 `}
             </div>
         </div>
@@ -563,7 +490,17 @@ function renderProgress() {
 
 function renderSettings() {
     const page = document.getElementById('page-settings');
-    if (!page) return; // Segurança
+    
+    if (Object.keys(allThemes).length === 0) {
+         page.innerHTML = `
+            ${getPageHeader('Configurações')}
+            <div class="card p-6 text-center">
+                <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
+                <p class="text-gray-300">Não foi possível carregar os dados dos temas (<code>themes.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
+            </div>
+        `;
+        return;
+    }
     
     const currentThemeName = userProfile.theme || 'taylorSwift';
 
@@ -572,16 +509,15 @@ function renderSettings() {
         
         <div class="card p-6 mb-6">
             <h2 class="text-xl font-bold mb-4">Tema do Aplicativo</h2>
-            <p class="text-secondary mb-6">Escolha seu tema favorito. A mudança é salva automaticamente.</p>
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 ${Object.keys(allThemes).map(themeName => {
                     const theme = allThemes[themeName];
                     const isSelected = themeName === currentThemeName;
                     return `
                         <button 
-                            class="theme-option p-4 rounded-lg border-2 text-center"
+                            class="theme-option p-4 rounded-lg border-2"
                             data-theme="${themeName}"
-                            style="border-color: ${isSelected ? theme.primary : 'var(--border)'}; background: ${theme.bg};"
+                            style="border-color: ${isSelected ? theme.primary : 'var(--border)'}; background-color: ${theme.bg};"
                         >
                             <span class="font-medium" style="color: ${theme.text};">${theme.name}</span>
                         </button>
@@ -592,17 +528,18 @@ function renderSettings() {
 
         <div class="card p-6">
             <h2 class="text-xl font-bold mb-4">Conta</h2>
-            <p class="text-secondary mb-4">Você está logado como ${userProfile.name} (${userProfile.email || 'sem e-mail'}).</p>
-            <button id="logout-btn" class="btn-secondary w-full py-3 rounded-xl font-semibold" style="border-color: #ef4444; color: #ef4444;">
+            <p class="text-gray-300 mb-4">Você está logado como ${userProfile.name} (${userProfile.email || 'sem e-mail'}).</p>
+            <button id="logout-btn" class="btn-secondary w-full" style="border-color: #ef4444; color: #ef4444;">
                 Sair (Logout)
             </button>
         </div>
     `;
 
+    // Adiciona listeners
     document.querySelectorAll('.theme-option').forEach(btn => {
         btn.onclick = () => {
             const themeName = btn.dataset.theme;
-            applyTheme(themeName, true);
+            applyTheme(themeName, true); // Salva no DB
             renderSettings(); // Re-renderiza para mostrar a seleção
         };
     });
@@ -620,118 +557,80 @@ function renderSettings() {
     };
 }
 
-// --- LÓGICA DE LIÇÃO E EXERCÍCIOS ---
+// --- LÓGICA DE LIÇÃO E EXERCÍCIOS (AGORA EM PÁGINA CHEIA) ---
 
 /**
- * Converte o texto simples (quase-markdown) das explicações em HTML.
+ * Inicia uma lição. Chamado pelo clique no mapa.
+ * Prepara o estado e navega para a página de exercício.
  */
-function parseSimpleMarkdown(text = '') {
-    if (!text) return '';
-    return text
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Negrito
-        .replace(/• (.*?)(\n|$)/g, '<ul><li>$1</li></ul>') // Listas
-        .replace(/<\/ul><ul>/g, '') // Junta listas
-        .replace(/\n/g, '<br>'); // Quebra de linha
-}
-
-/**
- * Inicia uma lição.
- */
-async function startLektion(lektionId) {
+function startLektion(lektionId) {
     const lektion = allLektions.find(l => l.id === lektionId);
     if (!lektion) {
         console.error("Lição não encontrada:", lektionId);
         return;
     }
 
+    // Reseta o estado da lição
     currentLektion = lektion;
-    
-    // ATUALIZAÇÃO: Verifica se há progresso salvo
-    // Temos que ler UMA VEZ do banco de dados, pois o userProfile pode estar
-    // um pouco desatualizado se o usuário fechou o app rápido.
-    try {
-        const profileDocRef = doc(db, "users", userId, "profile", "data");
-        const docSnap = await getDoc(profileDocRef);
-        const profileData = docSnap.data() || {};
-        userProfile.inProgressLektions = profileData.inProgressLektions || {};
-        
-        const savedProgress = userProfile.inProgressLektions?.[lektionId];
-        if (savedProgress && savedProgress < lektion.exercises.length) {
-            currentExerciseIndex = savedProgress;
-            console.log(`Continuando lição ${lektionId} do exercício ${savedProgress}`);
-        } else {
-            currentExerciseIndex = 0;
-        }
-        
-        userAnswer = '';
-        feedback = null;
-        window.location.hash = '#/exercise';
+    currentExerciseIndex = 0;
+    userAnswer = '';
+    feedback = null;
 
-    } catch (error) {
-        console.error("Erro ao ler progresso salvo:", error);
-        currentExerciseIndex = 0; // Começa do zero se houver erro
-        userAnswer = '';
-        feedback = null;
-        window.location.hash = '#/exercise';
-    }
+    // Navega para a página de exercício
+    window.location.hash = '#/exercise';
 }
 
 /**
- * Renderiza a PÁGINA de exercício
+ * Renderiza a PÁGINA de exercício (substitui renderLektionInModal)
  */
 function renderExercisePage() {
     const page = document.getElementById('page-exercise');
-    if (!page) return; // Segurança
 
     if (!currentLektion) {
         page.innerHTML = `
-            <div class="card p-6 text-center">
-                <h2 class="text-2xl font-bold mb-4 text-red-500">Erro</h2>
-                <p class="text-secondary mb-6">Nenhuma lição está selecionada.</p>
-                <button id="back-to-map" class="btn-primary py-3 px-6 rounded-xl">Voltar ao Mapa</button>
-            </div>
+            <h2 class="text-2xl font-bold mb-4 text-red-500">Erro</h2>
+            <p class="text-gray-300 mb-6">Nenhuma lição está selecionada.</p>
+            <button id="back-to-map" class="btn-primary">Voltar ao Mapa</button>
         `;
         document.getElementById('back-to-map').onclick = () => window.location.hash = '#/map';
         return;
     }
     
+    // O conteúdo agora é uma página inteira
     page.innerHTML = `
-        <div class="flex items-center justify-between gap-4 mb-6">
-            <button id="back-to-map-btn" class="btn-secondary !border-0 !bg-gray-700/50 hover:!bg-gray-600/50" style="padding: 0.75rem;">
-                <i data-lucide="x" class="w-6 h-6"></i>
+        <div class="exercise-page-header">
+            <button id="back-to-map-btn" class="btn-secondary" style="padding: 0.5rem 0.75rem;">
+                <i data-lucide="arrow-left" class="w-6 h-6"></i>
             </button>
-            <div class="flex-grow text-right">
-                <h1 class="text-2xl font-bold" style="color: var(--primary);">${currentLektion.title}</h1>
-                <p class="text-secondary">Exercício ${currentExerciseIndex + 1} de ${currentLektion.exercises.length}</p>
+            <div>
+                <h1 class="text-2xl md:text-3xl font-bold" style="color: var(--primary);">${currentLektion.title}</h1>
+                <p class="text-gray-400">Exercício ${currentExerciseIndex + 1} de ${currentLektion.exercises.length}</p>
             </div>
         </div>
         <div id="exercise-container-page"></div>
     `;
     
     document.getElementById('back-to-map-btn').onclick = () => {
-        // Simplesmente volta ao mapa. O progresso já está salvo.
-        currentLektion = null; // Limpa a lição atual
-        window.location.hash = '#/map';
+        // Confirmação para sair
+        // REMOVIDO: O confirm() não funciona bem no ambiente de iframe.
+        // if (confirm("Você tem certeza que quer sair? Seu progresso neste exercício não será salvo.")) {
+            currentLektion = null; // Limpa a lição atual
+            window.location.hash = '#/map';
+        // }
     };
     
     safeCreateIcons();
-    renderCurrentExerciseOnPage();
+    renderCurrentExerciseOnPage(); // Renderiza o exercício atual dentro da página
 }
 
 /**
- * Renderiza o exercício ATUAL dentro da página
+ * Renderiza o exercício ATUAL dentro da página de exercício
  */
 function renderCurrentExerciseOnPage() {
     const container = document.getElementById('exercise-container-page');
     if (!container || !currentLektion) return;
 
     const exercise = currentLektion.exercises[currentExerciseIndex];
-    if (!exercise) {
-        console.error("Erro: Exercício não encontrado no índice", currentExerciseIndex, currentLektion);
-        container.innerHTML = `<p class="text-red-500">Erro: Exercício não encontrado.</p>`;
-        return;
-    }
-    
     const progress = ((currentExerciseIndex + 1) / currentLektion.exercises.length) * 100;
 
     let inputHtml = '';
@@ -740,11 +639,10 @@ function renderCurrentExerciseOnPage() {
             <input 
                 type="text"
                 id="exercise-input"
-                class="input-field w-full text-lg p-4 rounded-xl"
+                class="input-field"
                 placeholder="Digite sua resposta..."
                 value="${userAnswer}"
                 ${feedback ? 'disabled' : ''}
-                autocomplete="off"
             >
         `;
     } else if (exercise.type === 'multipleChoice') {
@@ -752,7 +650,7 @@ function renderCurrentExerciseOnPage() {
             <div class="flex flex-col gap-3">
                 ${exercise.options.map(option => `
                     <button 
-                        class="btn-secondary text-left p-4 text-base w-full rounded-xl"
+                        class="btn-secondary text-left p-4 text-base w-full ${userAnswer === option ? '!bg-var(--primary) !text-white' : ''}"
                         data-option="${option}"
                         ${feedback ? 'disabled' : ''}
                         style="${userAnswer === option ? `background-color: var(--primary); color: white; border-color: var(--primary);` : ''}"
@@ -765,54 +663,58 @@ function renderCurrentExerciseOnPage() {
     }
 
     container.innerHTML = `
+        <!-- Progresso -->
         <div class="card p-4 mb-6">
-            <div class="progress-bar h-2.5 rounded-full" style="margin: 0;">
-                <div class="progress-fill h-2.5 rounded-full" style="width: ${progress}%;"></div>
+            <div class="progress-bar" style="margin: 0;">
+                <div class="progress-fill" style="width: ${progress}%;"></div>
             </div>
         </div>
 
+        <!-- Pergunta e Resposta -->
         <div class="card p-6">
+            <!-- Pergunta -->
             <h3 class="text-xl font-medium mb-6">${exercise.question.replace(/___/g, '<span class="font-bold text-gray-400">___</span>')}</h3>
             
+            <!-- Input -->
             <div class="mb-4">${inputHtml}</div>
             
+            <!-- Feedback -->
             <div id="feedback-container">
                 ${feedback ? `
                     <div class="feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}">
                         <i data-lucide="${feedback.isCorrect ? 'check-circle' : 'x-circle'}" class="w-8 h-8 flex-shrink-0"></i>
                         <div>
                             <strong class="block mb-1">${feedback.isCorrect ? 'Correto!' : 'Incorreto'}</strong>
-                            <span class="text-secondary">${feedback.explanation}</span>
+                            ${feedback.explanation}
                         </div>
                     </div>
                 ` : ''}
             </div>
             
+            <!-- Botões de Ação -->
             <div class="flex gap-4 mt-8 pt-6 border-t" style="border-color: var(--border);">
-                <button id="grammar-btn" class="btn-secondary !px-4 !py-3 rounded-xl">
-                    <i data-lucide="book-open" class="w-5 h-5"></i>
+                <button id="grammar-btn" class="btn-secondary">
+                    <i data-lucide="book-open" class="w-5 h-5 mr-2"></i> Gramática
                 </button>
-                <button id="action-btn" class="btn-primary flex-grow !py-3 rounded-xl font-semibold" ${(!userAnswer && !feedback) ? 'disabled' : ''}>
+                <button id="action-btn" class="btn-primary flex-grow" ${(!userAnswer && !feedback) ? 'disabled' : ''}>
                     ${feedback ? 'Próximo →' : 'Verificar'}
                 </button>
             </div>
         </div>
     `;
 
-    // Listeners
+    // Adiciona Listeners
     if (exercise.type === 'fillBlank' || exercise.type === 'translation') {
         const input = document.getElementById('exercise-input');
-        if (input) { // Adiciona verificação
-            const actionBtn = document.getElementById('action-btn');
-            input.oninput = (e) => {
-                userAnswer = e.target.value;
-                if (!feedback && actionBtn) actionBtn.disabled = !userAnswer;
-            };
-            input.onkeydown = (e) => {
-                if (e.key === 'Enter' && !feedback && userAnswer && actionBtn) actionBtn.click();
-            };
-            if (!feedback) input.focus();
-        }
+        const actionBtn = document.getElementById('action-btn');
+        input.oninput = (e) => {
+            userAnswer = e.target.value;
+            if (!feedback) actionBtn.disabled = !userAnswer; // Ativa/desativa o botão
+        };
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter' && !feedback && userAnswer) document.getElementById('action-btn').click();
+        };
+        if (!feedback) input.focus();
     } else if (exercise.type === 'multipleChoice') {
         document.querySelectorAll('.btn-secondary[data-option]').forEach(btn => {
             btn.onclick = () => {
@@ -823,63 +725,63 @@ function renderCurrentExerciseOnPage() {
         });
     }
     
-    const grammarBtn = document.getElementById('grammar-btn');
-    if (grammarBtn) grammarBtn.onclick = showGrammarModal;
-    
-    const actionBtn = document.getElementById('action-btn');
-    if (actionBtn) actionBtn.onclick = feedback ? nextExercise : checkAnswer;
+    document.getElementById('grammar-btn').onclick = showGrammarModal; // Continua abrindo gramática no modal
+    document.getElementById('action-btn').onclick = feedback ? nextExercise : checkAnswer;
     
     safeCreateIcons();
 }
 
 /**
- * Abre o modal de gramática
+ * Abre o modal de gramática (sem alterações)
  */
 function showGrammarModal() {
-    if (!currentLektion || !currentLektion.grammarKeys) { // Segurança
-         showModal("Erro", "Nenhuma gramática associada a esta lição.");
-        return;
-    }
+    if (!currentLektion) return;
 
-    if (!allGrammar || Object.keys(allGrammar).length === 0) {
+    if (Object.keys(allGrammar).length === 0) {
         showModal("Erro de Carregamento", "Não foi possível carregar os dados de gramática (<code>grammarExplanations.js</code>).");
         return;
     }
 
     const grammarHtml = currentLektion.grammarKeys.map(key => {
         const explanation = allGrammar[key];
-        return explanation ? `
-            <div class="mb-6"> <!-- Corrigido de classmb-6 -->
-                <h3 class="text-xl font-bold mb-3" style="color: var(--primary);">${explanation.title}</h3>
-                <div class="text-gray-700 whitespace-pre-line leading-relaxed break-words">
-                    ${parseSimpleMarkdown(explanation.content)}
+        if (!explanation) {
+            return `<p class="text-red-500">Erro: Tópico de gramática "${key}" não encontrado.</p>`;
+        }
+        
+        // *** LINHA MODIFICADA ***
+        // Usa a nova função para "traduzir" o Markdown
+        const parsedContent = parseSimpleMarkdown(explanation.content);
+
+        return `
+            <div class="mb-6">
+                <h3 class="text-xl font-bold mb-3" style="color: var(--accent);">${explanation.title}</h3>
+                <div class="text-gray-300 whitespace-pre-line leading-relaxed break-words">
+                    ${parsedContent}
                 </div>
             </div>
-        ` : `<p class="text-red-500">Erro: Tópico de gramática "${key}" não encontrado.</p>`;
-    }).join('<hr class="my-6">');
+        `;
+    }).join('');
     
-    // ATUALIZAÇÃO: O título agora é fixo no CSS, passamos só o conteúdo
-    showModal("Explicações Gramaticais 📚", grammarHtml);
+    showModal("Explicações Gramaticais 📚", grammarHtml, '900px');
 }
 
 /**
- * Verifica a resposta
+ * Verifica a resposta (sem alterações, mas agora re-renderiza a PÁGINA)
  */
 function checkAnswer() {
-    if (!userAnswer || !currentLektion) return; // Segurança
+    if (!userAnswer) return;
     
     const exercise = currentLektion.exercises[currentExerciseIndex];
-    if (!exercise) return; // Segurança
-
     const userAns = userAnswer.trim().toLowerCase();
     const correctAns = exercise.answer.toLowerCase();
     const alternatives = exercise.alternatives?.map(a => a.toLowerCase()) || [];
 
+    // Lógica de checagem (igual ao React app)
     const correctAnswers = [correctAns, ...alternatives];
     const isCorrect = correctAnswers.some(ans => {
         if (ans.includes('|')) {
             const parts = ans.split('|');
-            const userParts = userAns.split(/[\s,|]+/);
+            const userParts = userAns.split(/[\s,|]+/); // Aceita espaço, vírgula ou | como separador
             return parts.every((part, idx) => userParts[idx] === part);
         }
         return userAns === ans;
@@ -893,69 +795,50 @@ function checkAnswer() {
     if (isCorrect) {
         // Adiciona pontos
         const newScore = (userProfile.score || 0) + 10;
-        userProfile.score = newScore;
-        
-        // ATUALIZAÇÃO: Salva o progresso parcial da lição
-        const nextIndex = currentExerciseIndex + 1;
-        const currentLektionId = currentLektion.id;
-        
-        if (!userProfile.inProgressLektions) {
-            userProfile.inProgressLektions = {};
-        }
-        userProfile.inProgressLektions[currentLektionId] = nextIndex;
-
-        saveProfileData({ 
-            score: newScore,
-            inProgressLektions: userProfile.inProgressLektions
-        }, false);
+        userProfile.score = newScore; // Atualiza localmente
+        saveProfileData({ score: newScore }, false); // Salva no FB sem loading
     }
     
-    renderCurrentExerciseOnPage();
+    renderCurrentExerciseOnPage(); // MUDADO: Renderiza na página
 }
 
 /**
- * Avança para o próximo exercício
+ * Avança para o próximo exercício (sem alterações)
  */
 async function nextExercise() {
-    if (!currentLektion) return; // Segurança
     if (currentExerciseIndex < currentLektion.exercises.length - 1) {
+        // Próximo exercício
         currentExerciseIndex++;
         userAnswer = '';
         feedback = null;
-        renderCurrentExerciseOnPage();
+        renderCurrentExerciseOnPage(); // MUDADO: Renderiza na página
     } else {
+        // Finalizou a lição
         await finishLektion();
     }
 }
 
 /**
- * Finaliza a lição
+ * Finaliza a lição (agora navega para o mapa)
  */
 async function finishLektion() {
-    if (!currentLektion) return; // Segurança
-    showLoading("Salvando progresso...");
+    showLoading("Salvando progresso..."); // USA O MODAL para loading
     
     const completed = userProfile.completedLektions || [];
     if (!completed.includes(currentLektion.id)) {
         completed.push(currentLektion.id);
-        userProfile.completedLektions = completed;
+        userProfile.completedLektions = completed; // Atualiza local
+        await saveProfileData({ completedLektions: completed }, false); // Salva no FB
     }
     
-    // ATUALIZAÇÃO: Remove o progresso "em andamento"
-    if (userProfile.inProgressLektions) {
-        delete userProfile.inProgressLektions[currentLektion.id];
-    }
-
-    await saveProfileData({ 
-        completedLektions: userProfile.completedLektions,
-        inProgressLektions: userProfile.inProgressLektions
-    }, false);
-    
-    hideModal();
-    currentLektion = null;
-    window.location.hash = '#/map';
+    hideModal(); // Fecha o modal de "Salvando..."
+    currentLektion = null; // Limpa a lição
+    window.location.hash = '#/map'; // Volta para o mapa
+    // O router vai rodar e re-renderizar o mapa com a lição completa
 }
 
 // --- INICIALIZAÇÃO DO APP ---
+// Executa o initFirebase assim que o script for lido,
+// como ele está no fim do <body>, o DOM estará pronto.
 initFirebase();
 
