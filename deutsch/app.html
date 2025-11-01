@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
+    <!-- ATUALIZAÇÃO: viewport-fit=cover para melhor suporte em iPhones com notch -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Deutsch A1.1</title>
     
@@ -21,9 +22,10 @@
             --card: #f0e6ff;
             --text: #2d2033;
             --border: #d8c3e8;
-            /* ATUALIZAÇÃO: Variáveis de transparência (definidas por JS) */
-            --card-bg-transparent: rgba(240, 230, 255, 0.7);
-            --border-bg-transparent: rgba(216, 195, 232, 0.5);
+            /* Valores RGB para transparência */
+            --text-rgb: 45, 32, 51;
+            --card-rgb: 240, 230, 255;
+            --border-rgb: 216, 195, 232;
         }
 
         body {
@@ -31,6 +33,7 @@
             background: var(--bg);
             color: var(--text);
             transition: color 0.3s;
+            /* ATUALIZAÇÃO: Garante espaço para a barra de navegação flutuante */
             padding-bottom: 120px;
         }
 
@@ -39,21 +42,142 @@
             background-color: var(--card);
             border: 1px solid var(--border);
         }
-...
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+            transition: all 0.2s ease;
+        }
+        .btn-primary:hover {
+            opacity: 0.85;
+        }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-secondary {
+            background-color: transparent;
+            color: var(--text);
+            border: 2px solid var(--border);
+            transition: all 0.2s ease;
+        }
+        .btn-secondary:hover {
+            background-color: var(--border);
+        }
+        .input-field {
+            background-color: var(--bg);
+            color: var(--text);
+            border: 2px solid var(--border);
+        }
+        .input-field:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(var(--text-rgb), 0.1);
+        }
+        .progress-bar {
+            background-color: var(--border);
+        }
+        .progress-fill {
+            background: var(--primary);
+        }
+        
+        /* Texto secundário para temas claros/escuros */
+        .text-secondary {
+            color: var(--text);
+            opacity: 0.7;
+        }
+
+        /* Feedback (para fundo claro ou escuro) */
+        .feedback {
+            padding: 1rem;
+            border-radius: 0.75rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .feedback.correct {
+            background-color: rgba(40, 167, 69, 0.15);
+            color: #28a745;
+            border: 1px solid rgba(40, 167, 69, 0.3);
+        }
+        .feedback.incorrect {
+            background-color: rgba(220, 53, 69, 0.15);
+            color: #dc3545;
+            border: 1px solid rgba(220, 53, 69, 0.3);
+        }
+
+        /* Lektion Cards */
+        .lektion-card.locked {
+            opacity: 0.6;
+        }
+
+        /* --- ATUALIZAÇÃO: Estilos do Modal de Gramática --- */
+        #modal-container {
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+        }
+        #modal-content {
+            /* Fundo branco fixo para o modal */
+            background-color: #ffffff;
+            /* Cor de texto escura fixa */
+            color: #1a202c;
+            /* Tamanho e scroll */
+            max-width: 600px;
+            width: calc(100% - 2rem);
+            max-height: 85vh;
+            overflow-y: auto;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            padding: 1.5rem;
+            position: relative;
+        }
+        #modal-close-btn {
+            position: absolute;
+            top: 0.75rem;
+            right: 0.75rem;
+            background-color: #e2e8f0;
+            color: #4a5568;
+            border-radius: 99px;
+            padding: 0.25rem;
+            transition: all 0.2s ease;
+        }
+        #modal-close-btn:hover {
+            background-color: #cbd5e0;
+            transform: scale(1.1);
+        }
+        /* Estilos para o conteúdo markdown dentro do modal */
+        #modal-body h3 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary); /* Usa a cor primária do tema */
+            margin-bottom: 0.75rem;
+        }
+        #modal-body strong {
+            font-weight: 700;
+            color: #000;
+        }
+        #modal-body ul {
+            list-style-type: disc;
+            padding-left: 1.5rem;
+            margin-top: 0.5rem;
+            margin-bottom: 1rem;
+            line-height: 1.6;
+        }
+
         /* --- ATUALIZAÇÃO: Estilos da Barra de Navegação "Liquid Glass" --- */
         .liquid-nav-container {
-            /* 1. Flutuante (Subido 1rem) */
+            /* 1. Flutuante */
             position: fixed;
-            bottom: 1rem; /* ATUALIZADO: Subido da base */
+            bottom: 0; /* Começa no fundo */
             left: 50%;
             transform: translateX(-50%);
             /* Ajusta para áreas seguras (iPhone X) */
-            padding-bottom: env(safe-area-inset-bottom); /* Padding só para safe area */
+            padding-bottom: env(safe-area-inset-bottom, 1rem); 
             padding-left: 1rem;
             padding-right: 1rem;
-            /* REMOVIDO: padding-top: 1rem; */
+            padding-top: 1rem;
             width: 100%;
-            max-width: 500px;
+            max-width: 500px; /* Limita a largura em desktops */
             z-index: 1000;
             display: flex;
             justify-content: center;
@@ -61,18 +185,22 @@
         
         .liquid-nav {
             /* 2. Efeito "Glassmorphism" */
-            /* ATUALIZADO: Usa a variável transparente pré-calculada */
-            background-color: var(--card-bg-transparent);
+            background-color: rgba(var(--card-rgb), 0.7); /* Transparência do Card */
             backdrop-filter: blur(15px);
             -webkit-backdrop-filter: blur(15px);
-            /* ATUALIZADO: Usa a variável transparente pré-calculada */
-            border: 1px solid var(--border-bg-transparent);
+            border: 1px solid rgba(var(--border-rgb), 0.5);
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
             
             /* 1. Formato "Pill" */
             border-radius: 99px;
             padding: 0.75rem; /* 12px */
-...
+            
+            /* Layout dos links */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.25rem; /* 4px */
+            position: relative; /* Para a pílula líquida */
         }
         
         /* 3. Seletor Líquido (A Pílula que se move) */
@@ -81,6 +209,122 @@
             top: 0.75rem; /* 12px (mesmo que o padding do pai) */
             height: calc(100% - 1.5rem); /* Altura total - padding vert. */
             background-color: var(--primary);
-...
+            border-radius: 99px;
+            z-index: 1;
+            /* A MÁGICA: Transições suaves */
+            transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            /* Inicialmente escondida */
+            width: 0;
+            left: 0;
+            opacity: 0;
+        }
 
+        .nav-link {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.125rem; /* 2px */
+            padding: 0.25rem 0.75rem; /* 4px 12px */
+            border-radius: 99px;
+            text-decoration: none;
+            cursor: pointer;
+            z-index: 2; /* Fica acima da pílula */
+            min-width: 64px; /* Garante tamanho mínimo */
+            transition: color 0.3s ease, opacity 0.3s ease;
+            color: var(--text);
+            opacity: 0.7; /* Cor dos inativos */
+        }
+        .nav-link span {
+            font-size: 0.75rem; /* 12px */
+            font-weight: 500;
+        }
+        
+        /* Estado ATIVO (definido via JS) */
+        .nav-link.active {
+            color: white; /* Texto do item ativo */
+            opacity: 1;
+        }
+        /* Não-ativo quando passa o mouse */
+        .nav-link:not(.active):hover {
+            opacity: 1;
+        }
+    </style>
+
+</head>
+<body>
+
+    <!-- Conteúdo das Páginas -->
+    <div class="max-w-3xl mx-auto px-4">
+        
+        <!-- Loader da Página (Tela de carregamento inicial) -->
+        <div id="page-loader" class="fixed inset-0 z-[9999] flex items-center justify-center" style="background: var(--bg);">
+            <div class="text-center">
+                <svg class="animate-spin h-10 w-10 mx-auto mb-4" style="color: var(--primary);" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="font-medium text-lg">Carregando seu progresso...</p>
+            </div>
+        </div>
+        
+        <!-- Página: Início -->
+        <div id="page-home"></div>
+        
+        <!-- Página: Mapa -->
+        <div id="page-map" class="hidden"></div>
+        
+        <!-- Página: Progresso -->
+        <div id="page-progress" class="hidden"></div>
+        
+        <!-- Página: Configurações -->
+        <div id="page-settings" class="hidden"></div>
+        
+        <!-- Página: Exercício (tela cheia) -->
+        <div id="page-exercise" class="hidden pt-8"></div>
+        
+    </div>
+    
+    <!-- Modal (Usado para Gramática e Loadings) -->
+    <div id="modal-container" class="fixed inset-0 z-[5000] flex items-center justify-center p-4 hidden">
+        <div id="modal-content">
+            <!-- O conteúdo do modal é injetado pelo JS -->
+        </div>
+    </div>
+    
+    <!-- ATUALIZAÇÃO: Barra de Navegação "Liquid Glass" -->
+    <nav class="liquid-nav-container">
+        <div class="liquid-nav">
+            <!-- 3. A Pílula Líquida (controlada por JS) -->
+            <div id="nav-liquid-pill" class="liquid-pill"></div>
+            
+            <!-- Links (data-link-id é usado pelo JS) -->
+            <a href="#/home" class="nav-link" data-link-id="home">
+                <i data-lucide="home" class="w-5 h-5"></i>
+                <span>Início</span>
+            </a>
+            <a href="#/map" class="nav-link" data-link-id="map">
+                <i data-lucide="map" class="w-5 h-5"></i>
+                <span>Mapa</span>
+            </a>
+            <a href="#/progress" class="nav-link" data-link-id="progress">
+                <i data-lucide="bar-chart-3" class="w-5 h-5"></i>
+                <span>Progresso</span>
+            </a>
+            <a href="#/settings" class="nav-link" data-link-id="settings">
+                <i data-lucide="settings" class="w-5 h-5"></i>
+                <span>Ajustes</span>
+            </a>
+        </div>
+    </nav>
+    
+    <!-- Scripts de Dados -->
+    <script src="themes.js"></script>
+    <script src="grammarExplanations.js"></script>
+    <script src="exercisesData.js"></script>
+    
+    <!-- Script Principal do App (Firebase SDK v9 Modular) -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
 
