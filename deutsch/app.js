@@ -47,12 +47,12 @@ const App = () => {
         return () => unsubscribe();
     }, []);
 
-    // Initialize Lucide icons only once
+    // Initialize Lucide icons
     React.useEffect(() => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    }, [currentView]); // Only re-run when view changes
+    }, [currentView, showMenu, showGrammar, feedback]); // Re-run when view or modals change
 
     // Load user data from Firestore
     const loadUserData = async (uid) => {
@@ -66,10 +66,12 @@ const App = () => {
                 setCurrentTheme(data.theme || 'taylorSwift');
             } else {
                 // Initialize new user data
+                // ATUALIZADO: Adicionado lektionProgress
                 const newUserData = {
                     score: 0,
                     completedLektions: [],
                     theme: 'taylorSwift',
+                    lektionProgress: {}, // <-- NOVO: Garante que o progresso exista
                     exerciseStats: {},
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 };
@@ -86,11 +88,13 @@ const App = () => {
         if (!user) return;
         
         try {
+            // Atualiza o estado local imediatamente para responsividade
+            setUserData(prev => ({ ...prev, ...data }));
+            // Envia para o Firestore
             await db.collection('users').doc(user.uid).update({
                 ...data,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             });
-            setUserData(prev => ({ ...prev, ...data }));
         } catch (error) {
             console.error('Error saving data:', error);
         }
@@ -109,16 +113,29 @@ const App = () => {
     // Change theme
     const changeTheme = async (themeName) => {
         setCurrentTheme(themeName);
+        // ATUALIZADO: Salva o tema no Firebase (como já fazia)
         await saveUserData({ theme: themeName });
         setShowMenu(false);
     };
 
     // Start Lektion
+    // ATUALIZADO: Esta função agora lê o progresso salvo
     const startLektion = (lektionId) => {
         const lektion = window.exercisesData.find(l => l.id === lektionId);
         if (lektion) {
+            // Lê o progresso salvo do userData
+            const lektionProgress = userData?.lektionProgress || {};
+            // Encontra o índice salvo para esta lição, ou 0 se não houver
+            let startIndex = lektionProgress[lektionId] || 0;
+
+            // Se o índice salvo for igual ou maior que o total (lição completa),
+            // reseta para 0 para permitir a revisão.
+            if (startIndex >= lektion.exercises.length) {
+                startIndex = 0;
+            }
+
             setCurrentLektion(lektion);
-            setCurrentExerciseIndex(0);
+            setCurrentExerciseIndex(startIndex); // <-- USA O ÍNDICE CORRETO
             setUserAnswer('');
             setFeedback(null);
             setCurrentView('exercise');
@@ -151,32 +168,58 @@ const App = () => {
         });
 
         if (isCorrect) {
-            // Add points
+            // Add points (só se for a primeira vez, mas a lógica de pontos pode ser refinada)
+            // Por enquanto, vamos manter simples
             const newScore = (userData?.score || 0) + 10;
+            // Salva a pontuação (não precisamos salvar o progresso aqui,
+            // salvamos no 'nextExercise')
             saveUserData({ score: newScore });
         }
     };
 
     // Next exercise
+    // ATUALIZADO: Esta função agora SALVA o progresso
     const nextExercise = () => {
+        const lektionId = currentLektion.id;
+
+        // Verifica se NÃO é o último exercício
         if (currentExerciseIndex < currentLektion.exercises.length - 1) {
-            setCurrentExerciseIndex(currentExerciseIndex + 1);
+            const nextIndex = currentExerciseIndex + 1;
+            setCurrentExerciseIndex(nextIndex);
             setUserAnswer('');
             setFeedback(null);
+            
+            // SALVA O PROGRESSO NO FIREBASE
+            const newProgress = { ...(userData.lektionProgress || {}), [lektionId]: nextIndex };
+            saveUserData({ lektionProgress: newProgress }); // Salva em segundo plano
+            
         } else {
+            // Se for o último, chama finishLektion
             finishLektion();
         }
     };
 
     // Finish Lektion
+    // ATUALIZADO: Esta função agora salva o status de "completo"
     const finishLektion = async () => {
         if (!currentLektion || !userData) return;
         
+        const lektionId = currentLektion.id;
         const completedLektions = userData.completedLektions || [];
-        if (!completedLektions.includes(currentLektion.id)) {
-            completedLektions.push(currentLektion.id);
-            await saveUserData({ completedLektions });
+        const isNewCompletion = !completedLektions.includes(lektionId);
+
+        if (isNewCompletion) {
+            completedLektions.push(lektionId);
         }
+        
+        // Salva o índice final (igual ao total de exercícios) para marcar como "completo"
+        const newProgress = { ...(userData.lektionProgress || {}), [lektionId]: currentLektion.exercises.length };
+        
+        // Salva o status de completo E o progresso final
+        await saveUserData({ 
+            completedLektions: completedLektions, 
+            lektionProgress: newProgress 
+        });
         
         setCurrentLektion(null);
         setCurrentView('map');
@@ -282,6 +325,33 @@ const App = () => {
         const completedCount = userData?.completedLektions?.length || 0;
         const progress = (completedCount / totalLektions) * 100;
 
+        // ATUALIZADO: Encontra a próxima lição para começar/continuar
+        const nextLektion = React.useCallback(() => {
+            const completed = userData?.completedLektions || [];
+            const progress = userData?.lektionProgress || {};
+
+            // 1. Tenta encontrar uma lição em progresso (nem 0, nem completa)
+            for (const lektion of window.exercisesData) {
+                const lektionId = lektion.id;
+                const savedIndex = progress[lektionId] || 0;
+                if (savedIndex > 0 && savedIndex < lektion.exercises.length) {
+                    return lektion; // Encontrou uma lição em progresso
+                }
+            }
+
+            // 2. Se não houver, encontra a primeira lição não completada
+            for (const lektion of window.exercisesData) {
+                if (!completed.includes(lektion.id)) {
+                    return lektion; // Encontrou a próxima lição
+                }
+            }
+            
+            // 3. Se todas estiverem completas, retorna a primeira para revisar
+            return window.exercisesData[0];
+        }, [userData]);
+
+        const lektionToStart = nextLektion();
+
         return (
             <div>
                 <div className="card" style={{ backgroundColor: theme.card }}>
@@ -316,7 +386,7 @@ const App = () => {
 
                 <button 
                     className="btn-primary" 
-                    onClick={() => setCurrentView('map')}
+                    onClick={() => startLektion(lektionToStart.id)}
                     style={{ 
                         width: '100%',
                         padding: 20,
@@ -324,7 +394,12 @@ const App = () => {
                         background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                     }}
                 >
-                    Ir para Mapa de Aprendizado →
+                    {/* ATUALIZADO: Texto do botão é dinâmico */}
+                    {
+                        (userData?.lektionProgress && userData.lektionProgress[lektionToStart.id] > 0) ? 
+                        `Continuar: ${lektionToStart.title} →` :
+                        `Começar: ${lektionToStart.title} →`
+                    }
                 </button>
             </div>
         );
@@ -342,8 +417,15 @@ const App = () => {
                 
                 {window.exercisesData.map((lektion, index) => {
                     const isCompleted = completedLektions.includes(lektion.id);
+                    // Lógica de bloqueio: o primeiro (index 0) nunca está bloqueado
+                    // Os outros estão bloqueados se a *lição anterior* não estiver completa
                     const isLocked = index > 0 && !completedLektions.includes(window.exercisesData[index - 1].id);
                     
+                    // ATUALIZADO: Verifica se a lição está em progresso
+                    const lektionProgress = userData?.lektionProgress || {};
+                    const savedIndex = lektionProgress[lektion.id] || 0;
+                    const isInProgress = savedIndex > 0 && savedIndex < lektion.exercises.length;
+
                     return (
                         <div 
                             key={lektion.id}
@@ -374,7 +456,8 @@ const App = () => {
                                             color: theme.text
                                         }}
                                     >
-                                        {isCompleted ? 'Revisar' : 'Iniciar'}
+                                        {/* ATUALIZADO: Texto do botão dinâmico */}
+                                        {isCompleted ? 'Revisar' : (isInProgress ? 'Continuar' : 'Iniciar')}
                                     </button>
                                 )}
                             </div>
@@ -391,6 +474,10 @@ const App = () => {
         const completedCount = userData?.completedLektions?.length || 0;
         const totalExercises = window.exercisesData.reduce((sum, l) => sum + l.exercises.length, 0);
         const progress = (completedCount / totalLektions) * 100;
+
+        // ATUALIZADO: Calcula exercícios feitos
+        const lektionProgress = userData?.lektionProgress || {};
+        const exercisesDone = Object.values(lektionProgress).reduce((sum, count) => sum + count, 0);
 
         return (
             <div>
@@ -422,9 +509,10 @@ const App = () => {
 
                     <div className="card stat-card" style={{ backgroundColor: theme.card }}>
                         <div className="stat-number" style={{ color: theme.accent }}>
-                            {totalExercises}
+                            {/* ATUALIZADO: Mostra exercícios feitos vs total */}
+                            {exercisesDone}/{totalExercises}
                         </div>
-                        <div className="stat-label">Total de Exercícios</div>
+                        <div className="stat-label">Exercícios Feitos</div>
                     </div>
                 </div>
 
@@ -475,7 +563,8 @@ const App = () => {
         if (!currentLektion) return null;
 
         const exercise = currentLektion.exercises[currentExerciseIndex];
-        const progress = ((currentExerciseIndex + 1) / currentLektion.exercises.length) * 100;
+        // ATUALIZADO: O progresso agora é baseado no índice atual, não no +1
+        const progress = (currentExerciseIndex / currentLektion.exercises.length) * 100;
 
         // Auto-focus input when exercise changes
         React.useEffect(() => {
@@ -508,7 +597,7 @@ const App = () => {
                         <div 
                             className="progress-fill"
                             style={{ 
-                                width: `${progress}%`,
+                                width: `${progress}%`, // A barra começa vazia no ex 1
                                 background: `linear-gradient(90deg, ${theme.primary}, ${theme.accent})`
                             }}
                         ></div>
@@ -587,7 +676,7 @@ const App = () => {
 
                     {feedback && (
                         <div className={`feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}`}>
-                            {feedback.isCorrect ? '✓' : '✗'}
+                            {feedback.isCorrect ? <i data-lucide="check" width="24" height="24"></i> : <i data-lucide="x" width="24" height="24"></i>}
                             <div>
                                 <div style={{ fontWeight: 700, marginBottom: 5 }}>
                                     {feedback.isCorrect ? 'Correto!' : 'Incorreto'}
@@ -617,18 +706,20 @@ const App = () => {
                                     onClick={() => setShowGrammar(true)}
                                     style={{ borderColor: theme.primary }}
                                 >
-                                    📚 Gramática
+                                    <i data-lucide="book-open" width="18" height="18" style={{ verticalAlign: 'middle', marginRight: 5 }}></i>
+                                    Gramática
                                 </button>
                             </>
                         ) : (
                             <button 
                                 className="btn-primary"
-                                onClick={nextExercise}
+                                onClick={nextExercise} // Esta função agora lida com os dois casos
                                 style={{ 
                                     flex: 1,
                                     background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                                 }}
                             >
+                                {/* ATUALIZADO: O botão "Finalizar Lição" chama a mesma função */}
                                 {currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉'}
                             </button>
                         )}
@@ -712,9 +803,18 @@ const App = () => {
                     style={{ backgroundColor: theme.card }}
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <h2 style={{ fontSize: '1.8rem', marginBottom: 20, color: theme.primary }}>
-                        Explicações Gramaticais 📚
-                    </h2>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                        <h2 style={{ fontSize: '1.8rem', color: theme.primary }}>
+                            Gramática 📚
+                        </h2>
+                        <button 
+                            className="menu-btn"
+                            onClick={() => setShowGrammar(false)}
+                            style={{ color: theme.text }}
+                        >
+                            <i data-lucide="x" width="28" height="28"></i>
+                        </button>
+                    </div>
 
                     {currentLektion.grammarKeys.map(key => {
                         const explanation = window.grammarExplanations[key];
@@ -723,12 +823,14 @@ const App = () => {
                                 <h3 style={{ fontSize: '1.3rem', marginBottom: 10, color: theme.accent }}>
                                     {explanation.title}
                                 </h3>
-                                <div style={{ 
-                                    whiteSpace: 'pre-line', 
-                                    lineHeight: 1.6,
-                                    opacity: 0.9
-                                }}>
-                                    {explanation.content}
+                                {/* ATUALIZADO: Renderiza o HTML das explicações */}
+                                <div 
+                                    style={{ 
+                                        lineHeight: 1.6,
+                                        opacity: 0.9
+                                    }}
+                                    dangerouslySetInnerHTML={{ __html: explanation.content.replace(/\n/g, '<br />') }}
+                                >
                                 </div>
                             </div>
                         ) : null;
@@ -743,7 +845,7 @@ const App = () => {
                             background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                         }}
                     >
-                        Fechar
+                        Entendi, fechar
                     </button>
                 </div>
             </div>
