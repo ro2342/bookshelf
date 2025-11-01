@@ -33,10 +33,10 @@ let userProfile = {
 };
 let currentTheme = 'taylorSwift';
 
-// Dados estáticos (carregados pelos scripts no app.html)
-const allLektions = window.exercisesData || [];
-const allGrammar = window.grammarExplanations || {};
-const allThemes = window.themes || {};
+// ATUALIZAÇÃO: Deixamos de definir "|| []" aqui para que a verificação funcione
+const allLektions = window.exercisesData;
+const allGrammar = window.grammarExplanations;
+const allThemes = window.themes;
 
 // Variáveis de estado do exercício
 let currentLektion = null;
@@ -65,6 +65,37 @@ function safeCreateIcons() {
 
 function initFirebase() {
     try {
+        // --- NOVA VERIFICAÇÃO DE DADOS (MAIS CEDO) ---
+        // Verificamos se os scripts globais carregaram ANTES de fazer qualquer coisa.
+        if (!allThemes || Object.keys(allThemes).length === 0) {
+            document.body.innerHTML = `<div style="padding: 20px; font-family: sans-serif; color: #111;">
+                <h1>Erro Crítico de Carregamento</h1>
+                <p>O ficheiro <strong>themes.js</strong> não foi carregado ou está vazio.</p>
+                <p>Por favor, verifique se o ficheiro existe e se o nome em <code>app.html</code> está correto.</p>
+            </div>`;
+            console.error("ERRO: themes.js não carregou. 'window.themes' está indefinido ou vazio.");
+            return; // Para a execução
+        }
+        if (!allLektions || allLektions.length === 0) {
+            document.body.innerHTML = `<div style="padding: 20px; font-family: sans-serif; color: #111;">
+                <h1>Erro Crítico de Carregamento</h1>
+                <p>O ficheiro <strong>exercisesData.js</strong> não foi carregado ou está vazio.</p>
+                <p>Por favor, verifique se o ficheiro existe e se o nome em <code>app.html</code> está correto.</p>
+            </div>`;
+            console.error("ERRO: exercisesData.js não carregou. 'window.exercisesData' está indefinido ou vazio.");
+            return; // Para a execução
+        }
+         if (!allGrammar || Object.keys(allGrammar).length === 0) {
+            document.body.innerHTML = `<div style="padding: 20px; font-family: sans-serif; color: #111;">
+                <h1>Erro Crítico de Carregamento</h1>
+                <p>O ficheiro <strong>grammarExplanations.js</strong> não foi carregado ou está vazio.</p>
+                <p>Por favor, verifique se o ficheiro existe e se o nome em <code>app.html</code> está correto.</p>
+            </div>`;
+            console.error("ERRO: grammarExplanations.js não carregou. 'window.grammarExplanations' está indefinido ou vazio.");
+            return; // Para a execução
+        }
+        // --- FIM DA NOVA VERIFICAÇÃO ---
+
         app = initializeApp(firebaseConfig);
         db = getFirestore(app);
         auth = getAuth(app);
@@ -93,19 +124,24 @@ function initFirebase() {
 
 // Inicia a lógica principal do app
 function initializeAppLogic() {
-    console.log("App lógico iniciado para o usuário:", userId);
-    
-    // ATUALIZAÇÃO: Adiciona CSS dinâmico para legibilidade dos temas
-    const styleSheet = document.createElement("style");
-    styleSheet.type = "text/css";
-    styleSheet.innerText = `.text-secondary { color: var(--text); opacity: 0.7; }`;
-    document.head.appendChild(styleSheet);
-    
-    listenToProfile();
-    window.addEventListener('hashchange', router);
-    
-    // Adiciona o listener para o "popstate" (botão de voltar do navegador)
-    window.addEventListener('popstate', router);
+    try {
+        console.log("App lógico iniciado para o usuário:", userId);
+        
+        // ATUALIZAÇÃO: Adiciona CSS dinâmico para legibilidade dos temas
+        const styleSheet = document.createElement("style");
+        styleSheet.type = "text/css";
+        styleSheet.innerText = `.text-secondary { color: var(--text); opacity: 0.7; }`;
+        document.head.appendChild(styleSheet);
+        
+        listenToProfile();
+        window.addEventListener('hashchange', router);
+        
+        // Adiciona o listener para o "popstate" (botão de voltar do navegador)
+        window.addEventListener('popstate', router);
+    } catch (error) {
+        console.error("Erro fatal no initializeAppLogic:", error);
+        document.body.innerHTML = `<h1>Erro fatal ao iniciar o app.</h1><p>${error.message}</p>`;
+    }
 }
 
 // --- SISTEMA DE TEMAS (Inspirado no BookTracker) ---
@@ -125,10 +161,11 @@ function applyTheme(themeName, saveToDb = true) {
     document.documentElement.style.setProperty('--text', theme.text);
     document.documentElement.style.setProperty('--border', theme.border);
     
-    // ATUALIZAÇÃO: Adiciona valores RGB para o "Glassmorphism"
-    document.documentElement.style.setProperty('--text-rgb', theme['text-rgb'] || '45, 32, 51');
-    document.documentElement.style.setProperty('--card-rgb', theme['card-rgb'] || '240, 230, 255');
-    document.documentElement.style.setProperty('--border-rgb', theme['border-rgb'] || '216, 195, 232');
+    // ATUALIZAÇÃO: Constrói o rgba() em JS para garantir a transparência
+    const cardRgb = theme['card-rgb'] || '240, 230, 255';
+    const borderRgb = theme['border-rgb'] || '216, 195, 232';
+    document.documentElement.style.setProperty('--card-bg-transparent', `rgba(${cardRgb}, 0.7)`);
+    document.documentElement.style.setProperty('--border-bg-transparent', `rgba(${borderRgb}, 0.5)`);
 
 
     currentTheme = themeName;
@@ -149,39 +186,57 @@ function listenToProfile() {
     const profileDocRef = doc(db, "users", userId, "profile", "data");
     
     profileUnsubscribe = onSnapshot(profileDocRef, (docSnap) => {
-        const googleUser = auth.currentUser;
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            userProfile = {
-                ...userProfile, // Mantém padrões
-                ...data, // Sobrescreve com dados do FB
-                name: data.name || googleUser?.displayName || 'Estudante',
-                avatarUrl: data.avatarUrl || googleUser?.photoURL || ''
-            };
-            console.log("Perfil do usuário carregado:", userProfile);
-        } else {
-            console.log("Nenhum perfil encontrado, criando um novo...");
-            userProfile = {
-                score: 0,
-                completedLektions: [],
-                inProgressLektions: {},
-                theme: 'taylorSwift',
-                name: googleUser?.displayName || 'Estudante',
-                avatarUrl: googleUser?.photoURL || '',
-                uid: userId,
-                email: googleUser?.email || ''
-            };
-            // Usa setDoc para criar o documento
-            saveProfileData(userProfile, false); 
+        // ATUALIZAÇÃO: Envolvemos tudo num try...catch
+        try {
+            const googleUser = auth.currentUser;
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                userProfile = {
+                    ...userProfile, // Mantém padrões
+                    ...data, // Sobrescreve com dados do FB
+                    name: data.name || googleUser?.displayName || 'Estudante',
+                    avatarUrl: data.avatarUrl || googleUser?.photoURL || ''
+                };
+                console.log("Perfil do usuário carregado:", userProfile);
+            } else {
+                console.log("Nenhum perfil encontrado, criando um novo...");
+                userProfile = {
+                    score: 0,
+                    completedLektions: [],
+                    inProgressLektions: {},
+                    theme: 'taylorSwift',
+                    name: googleUser?.displayName || 'Estudante',
+                    avatarUrl: googleUser?.photoURL || '',
+                    uid: userId,
+                    email: googleUser?.email || ''
+                };
+                // Usa setDoc para criar o documento
+                saveProfileData(userProfile, false); 
+            }
+            
+            applyTheme(userProfile.theme || 'taylorSwift', false);
+            
+            // Garante que o loader existe antes de o esconder
+            const loader = document.getElementById('page-loader');
+            if (loader) {
+                loader.classList.add('hidden');
+            }
+            router(); // Roda o router pela primeira vez
+        } catch (error) {
+             console.error("Erro dentro do 'onSnapshot' (provavelmente de renderização):", error);
+             document.getElementById('page-loader').innerHTML = `<p class="text-red-500">Erro ao processar dados do perfil: ${error.message}</p>`;
         }
-        
-        applyTheme(userProfile.theme || 'taylorSwift', false);
-        
-        document.getElementById('page-loader').classList.add('hidden');
-        router(); // Roda o router pela primeira vez
     }, (error) => {
-        console.error("Erro ao ouvir perfil:", error);
-        document.getElementById('page-loader').innerHTML = `<p class="text-red-500">Erro ao carregar perfil: ${error.message}</p>`;
+        console.error("Erro ao ouvir perfil (Erro de Firestore):", error);
+        // ATUALIZAÇÃO: Mensagem de erro mais clara
+        const loader = document.getElementById('page-loader');
+        if(loader) {
+            loader.innerHTML = `<div class="p-4 text-red-700 bg-red-100 rounded-lg">
+                <h3 class="font-bold">Erro de Banco de Dados</h3>
+                <p>Não foi possível carregar seu perfil. Verifique suas regras de segurança do Firestore.</p>
+                <p class="text-sm mt-2">Erro: ${error.message}</p>
+            </div>`;
+        }
     });
 }
 
@@ -215,6 +270,7 @@ const modalContainer = document.getElementById('modal-container');
 const modalContent = document.getElementById('modal-content');
 
 function showModal(title, contentHtml) {
+    if (!modalContent) return; // Segurança
     // ATUALIZAÇÃO: O estilo agora é controlado pelo CSS
     modalContent.innerHTML = `
         <button id="modal-close-btn">
@@ -235,8 +291,8 @@ function showModal(title, contentHtml) {
 }
 
 function hideModal() {
-    modalContainer.classList.add('hidden');
-    modalContent.innerHTML = '';
+    if (modalContainer) modalContainer.classList.add('hidden');
+    if (modalContent) modalContent.innerHTML = '';
     document.removeEventListener('keydown', handleEscKey);
 }
 
@@ -247,6 +303,7 @@ function handleEscKey(event) {
 }
 
 function showLoading(message = 'Carregando...') {
+    if (!modalContainer || !modalContent) return; // Segurança
     // Usa o mesmo estilo de modal para consistência
     modalContent.innerHTML = `
         <div class="flex flex-col items-center justify-center p-8 text-center" style="color: var(--text);">
@@ -277,40 +334,46 @@ function hideAllPages() {
 function router() {
     if (!userId) return; 
 
-    const currentHash = window.location.hash || '#/home';
-    const [path] = currentHash.substring(2).split('/');
-    
-    if (path === 'menu') {
-        // Lógica de menu modal (se necessário)
-        return;
-    }
-
-    if (!modalContainer.classList.contains('hidden')) {
-        hideModal();
-    }
-
-    hideAllPages();
-    updateNavLinks(path || 'home'); // ATUALIZADO: Passa só o 'path'
-
-    const targetPage = document.getElementById(`page-${path}`);
-    if (targetPage) {
-        targetPage.classList.remove('hidden');
-        switch (path) {
-            case 'home': renderHome(); break;
-            case 'map': renderMap(); break;
-            case 'progress': renderProgress(); break;
-            case 'settings': renderSettings(); break;
-            case 'exercise': renderExercisePage(); break;
-            default:
-                document.getElementById('page-home').classList.remove('hidden');
-                renderHome();
+    try {
+        const currentHash = window.location.hash || '#/home';
+        const [path] = currentHash.substring(2).split('/');
+        
+        if (path === 'menu') {
+            // Lógica de menu modal (se necessário)
+            return;
         }
-    } else {
-        document.getElementById('page-home').classList.remove('hidden');
-        renderHome();
+
+        if (modalContainer && !modalContainer.classList.contains('hidden')) {
+            hideModal();
+        }
+
+        hideAllPages();
+        updateNavLinks(path || 'home'); // ATUALIZADO: Passa só o 'path'
+
+        const targetPage = document.getElementById(`page-${path}`);
+        if (targetPage) {
+            targetPage.classList.remove('hidden');
+            switch (path) {
+                case 'home': renderHome(); break;
+                case 'map': renderMap(); break;
+                case 'progress': renderProgress(); break;
+                case 'settings': renderSettings(); break;
+                case 'exercise': renderExercisePage(); break;
+                default:
+                    document.getElementById('page-home').classList.remove('hidden');
+                    renderHome();
+            }
+        } else {
+            document.getElementById('page-home').classList.remove('hidden');
+            renderHome();
+        }
+        
+        safeCreateIcons();
+    } catch (error) {
+        console.error("Erro fatal no router:", error);
+        document.getElementById('page-loader').innerHTML = `<p class="text-red-500">Erro ao navegar para a página: ${error.message}</p>`;
+        document.getElementById('page-loader').classList.remove('hidden');
     }
-    
-    safeCreateIcons();
 }
 
 // --- ATUALIZAÇÃO: LÓGICA DA BARRA DE NAVEGAÇÃO "LIQUID GLASS" ---
@@ -341,16 +404,19 @@ function moveLiquidPill(activeLinkEl) {
     if (!liquidPill || !navContainer) return;
 
     if (activeLinkEl) {
-        const navRect = navContainer.getBoundingClientRect();
-        const linkRect = activeLinkEl.getBoundingClientRect();
-        
-        // Calcula a posição da pílula relativa ao container
-        const pillLeft = linkRect.left - navRect.left;
-        const pillWidth = linkRect.width;
+        // ATUALIZAÇÃO: Damos um pequeno atraso para o navegador calcular o layout
+        setTimeout(() => {
+            const navRect = navContainer.getBoundingClientRect();
+            const linkRect = activeLinkEl.getBoundingClientRect();
+            
+            // Calcula a posição da pílula relativa ao container
+            const pillLeft = linkRect.left - navRect.left;
+            const pillWidth = linkRect.width;
 
-        liquidPill.style.left = `${pillLeft}px`;
-        liquidPill.style.width = `${pillWidth}px`;
-        liquidPill.style.opacity = '1';
+            liquidPill.style.left = `${pillLeft}px`;
+            liquidPill.style.width = `${pillWidth}px`;
+            liquidPill.style.opacity = '1';
+        }, 0); // 0ms é suficiente para 'empurrar' para a próxima frame
     } else {
         // Esconde a pílula se nenhuma rota estiver ativa (ex: #/exercise)
         liquidPill.style.opacity = '0';
@@ -375,20 +441,10 @@ function getPageHeader(title) {
 
 function renderHome() {
     const page = document.getElementById('page-home');
+    if (!page) return; // Segurança
     const completedCount = userProfile.completedLektions?.length || 0;
-    const totalLektions = allLektions.length;
+    const totalLektions = allLektions.length; // Já sabemos que não é 0
     
-    if (totalLektions === 0) {
-        page.innerHTML = `
-            ${getPageHeader('Início')}
-            <div class="card p-6 text-center">
-                <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
-                <p class="text-secondary">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>).</p>
-            </div>
-        `;
-        return;
-    }
-
     const progress = totalLektions > 0 ? (completedCount / totalLektions) * 100 : 0;
 
     page.innerHTML = `
@@ -419,20 +475,10 @@ function renderHome() {
 
 function renderMap() {
     const page = document.getElementById('page-map');
+    if (!page) return; // Segurança
     const completed = userProfile.completedLektions || [];
     const inProgress = userProfile.inProgressLektions || {};
 
-    if (allLektions.length === 0) {
-        page.innerHTML = `
-            ${getPageHeader('Mapa de Aprendizado')}
-            <div class="card p-6 text-center">
-                <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
-                <p class="text-secondary">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>).</p>
-            </div>
-        `;
-        return;
-    }
-    
     page.innerHTML = `
         ${getPageHeader('Mapa de Aprendizado')}
         <div class="space-y-4">
@@ -478,6 +524,7 @@ function renderMap() {
 
 function renderProgress() {
     const page = document.getElementById('page-progress');
+    if (!page) return; // Segurança
     const completedCount = userProfile.completedLektions?.length || 0;
     const totalLektions = allLektions.length;
     const score = userProfile.score || 0;
@@ -516,17 +563,7 @@ function renderProgress() {
 
 function renderSettings() {
     const page = document.getElementById('page-settings');
-    
-    if (Object.keys(allThemes).length === 0) {
-         page.innerHTML = `
-            ${getPageHeader('Configurações')}
-            <div class="card p-6 text-center">
-                <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
-                <p class="text-secondary">Não foi possível carregar os dados dos temas (<code>themes.js</code>).</p>
-            </div>
-        `;
-        return;
-    }
+    if (!page) return; // Segurança
     
     const currentThemeName = userProfile.theme || 'taylorSwift';
 
@@ -589,6 +626,7 @@ function renderSettings() {
  * Converte o texto simples (quase-markdown) das explicações em HTML.
  */
 function parseSimpleMarkdown(text = '') {
+    if (!text) return '';
     return text
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Negrito
         .replace(/• (.*?)(\n|$)/g, '<ul><li>$1</li></ul>') // Listas
@@ -611,22 +649,31 @@ async function startLektion(lektionId) {
     // ATUALIZAÇÃO: Verifica se há progresso salvo
     // Temos que ler UMA VEZ do banco de dados, pois o userProfile pode estar
     // um pouco desatualizado se o usuário fechou o app rápido.
-    const profileDocRef = doc(db, "users", userId, "profile", "data");
-    const docSnap = await getDoc(profileDocRef);
-    const profileData = docSnap.data() || {};
-    userProfile.inProgressLektions = profileData.inProgressLektions || {};
-    
-    const savedProgress = userProfile.inProgressLektions?.[lektionId];
-    if (savedProgress && savedProgress < lektion.exercises.length) {
-        currentExerciseIndex = savedProgress;
-        console.log(`Continuando lição ${lektionId} do exercício ${savedProgress}`);
-    } else {
-        currentExerciseIndex = 0;
+    try {
+        const profileDocRef = doc(db, "users", userId, "profile", "data");
+        const docSnap = await getDoc(profileDocRef);
+        const profileData = docSnap.data() || {};
+        userProfile.inProgressLektions = profileData.inProgressLektions || {};
+        
+        const savedProgress = userProfile.inProgressLektions?.[lektionId];
+        if (savedProgress && savedProgress < lektion.exercises.length) {
+            currentExerciseIndex = savedProgress;
+            console.log(`Continuando lição ${lektionId} do exercício ${savedProgress}`);
+        } else {
+            currentExerciseIndex = 0;
+        }
+        
+        userAnswer = '';
+        feedback = null;
+        window.location.hash = '#/exercise';
+
+    } catch (error) {
+        console.error("Erro ao ler progresso salvo:", error);
+        currentExerciseIndex = 0; // Começa do zero se houver erro
+        userAnswer = '';
+        feedback = null;
+        window.location.hash = '#/exercise';
     }
-    
-    userAnswer = '';
-    feedback = null;
-    window.location.hash = '#/exercise';
 }
 
 /**
@@ -634,6 +681,7 @@ async function startLektion(lektionId) {
  */
 function renderExercisePage() {
     const page = document.getElementById('page-exercise');
+    if (!page) return; // Segurança
 
     if (!currentLektion) {
         page.innerHTML = `
@@ -678,6 +726,12 @@ function renderCurrentExerciseOnPage() {
     if (!container || !currentLektion) return;
 
     const exercise = currentLektion.exercises[currentExerciseIndex];
+    if (!exercise) {
+        console.error("Erro: Exercício não encontrado no índice", currentExerciseIndex, currentLektion);
+        container.innerHTML = `<p class="text-red-500">Erro: Exercício não encontrado.</p>`;
+        return;
+    }
+    
     const progress = ((currentExerciseIndex + 1) / currentLektion.exercises.length) * 100;
 
     let inputHtml = '';
@@ -748,15 +802,17 @@ function renderCurrentExerciseOnPage() {
     // Listeners
     if (exercise.type === 'fillBlank' || exercise.type === 'translation') {
         const input = document.getElementById('exercise-input');
-        const actionBtn = document.getElementById('action-btn');
-        input.oninput = (e) => {
-            userAnswer = e.target.value;
-            if (!feedback) actionBtn.disabled = !userAnswer;
-        };
-        input.onkeydown = (e) => {
-            if (e.key === 'Enter' && !feedback && userAnswer) document.getElementById('action-btn').click();
-        };
-        if (!feedback) input.focus();
+        if (input) { // Adiciona verificação
+            const actionBtn = document.getElementById('action-btn');
+            input.oninput = (e) => {
+                userAnswer = e.target.value;
+                if (!feedback && actionBtn) actionBtn.disabled = !userAnswer;
+            };
+            input.onkeydown = (e) => {
+                if (e.key === 'Enter' && !feedback && userAnswer && actionBtn) actionBtn.click();
+            };
+            if (!feedback) input.focus();
+        }
     } else if (exercise.type === 'multipleChoice') {
         document.querySelectorAll('.btn-secondary[data-option]').forEach(btn => {
             btn.onclick = () => {
@@ -767,8 +823,11 @@ function renderCurrentExerciseOnPage() {
         });
     }
     
-    document.getElementById('grammar-btn').onclick = showGrammarModal;
-    document.getElementById('action-btn').onclick = feedback ? nextExercise : checkAnswer;
+    const grammarBtn = document.getElementById('grammar-btn');
+    if (grammarBtn) grammarBtn.onclick = showGrammarModal;
+    
+    const actionBtn = document.getElementById('action-btn');
+    if (actionBtn) actionBtn.onclick = feedback ? nextExercise : checkAnswer;
     
     safeCreateIcons();
 }
@@ -777,9 +836,12 @@ function renderCurrentExerciseOnPage() {
  * Abre o modal de gramática
  */
 function showGrammarModal() {
-    if (!currentLektion) return;
+    if (!currentLektion || !currentLektion.grammarKeys) { // Segurança
+         showModal("Erro", "Nenhuma gramática associada a esta lição.");
+        return;
+    }
 
-    if (Object.keys(allGrammar).length === 0) {
+    if (!allGrammar || Object.keys(allGrammar).length === 0) {
         showModal("Erro de Carregamento", "Não foi possível carregar os dados de gramática (<code>grammarExplanations.js</code>).");
         return;
     }
@@ -787,7 +849,7 @@ function showGrammarModal() {
     const grammarHtml = currentLektion.grammarKeys.map(key => {
         const explanation = allGrammar[key];
         return explanation ? `
-            <div classmb-6>
+            <div class="mb-6"> <!-- Corrigido de classmb-6 -->
                 <h3 class="text-xl font-bold mb-3" style="color: var(--primary);">${explanation.title}</h3>
                 <div class="text-gray-700 whitespace-pre-line leading-relaxed break-words">
                     ${parseSimpleMarkdown(explanation.content)}
@@ -804,9 +866,11 @@ function showGrammarModal() {
  * Verifica a resposta
  */
 function checkAnswer() {
-    if (!userAnswer) return;
+    if (!userAnswer || !currentLektion) return; // Segurança
     
     const exercise = currentLektion.exercises[currentExerciseIndex];
+    if (!exercise) return; // Segurança
+
     const userAns = userAnswer.trim().toLowerCase();
     const correctAns = exercise.answer.toLowerCase();
     const alternatives = exercise.alternatives?.map(a => a.toLowerCase()) || [];
@@ -853,6 +917,7 @@ function checkAnswer() {
  * Avança para o próximo exercício
  */
 async function nextExercise() {
+    if (!currentLektion) return; // Segurança
     if (currentExerciseIndex < currentLektion.exercises.length - 1) {
         currentExerciseIndex++;
         userAnswer = '';
@@ -867,6 +932,7 @@ async function nextExercise() {
  * Finaliza a lição
  */
 async function finishLektion() {
+    if (!currentLektion) return; // Segurança
     showLoading("Salvando progresso...");
     
     const completed = userProfile.completedLektions || [];
@@ -892,3 +958,4 @@ async function finishLektion() {
 
 // --- INICIALIZAÇÃO DO APP ---
 initFirebase();
+
