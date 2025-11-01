@@ -10,13 +10,10 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- === CORREÇÃO CRÍTICA: SDK v9 "COMPAT" === -->
-    <!-- Carrega as bibliotecas "compat" que criam o objeto 'firebase' global -->
-    <!-- Isso é necessário para que o Babel (app.js) possa acessá-las -->
+    <!-- Firebase -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-    <!-- === FIM DA CORREÇÃO === -->
     
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
@@ -361,14 +358,11 @@
     <div id="root"></div>
 
     <!-- Load Data Files -->
-    <!-- CORREÇÃO: Adicionado ./ para tornar o caminho explícito -->
-    <script src="./themes.js"></script>
-    <script src="./grammarExplanations.js"></script>
-    <script src="./exercisesData.js"></script>
+    <script src="themes.js"></script>
+    <script src="grammarExplanations.js"></script>
+    <script src="exercisesData.js"></script>
     
     <!-- Load React App -->
-    <!-- CORREÇÃO: Adicionado ./ para tornar o caminho explícito -->
-    <script type="text/babel" src="./app.js"></script>
+    <script type="text/babel" src="app.js"></script>
 </body>
 </html>
-
