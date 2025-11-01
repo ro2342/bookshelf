@@ -32,20 +32,81 @@ const App = () => {
     const [feedback, setFeedback] = React.useState(null);
     const [showGrammar, setShowGrammar] = React.useState(false);
 
-    // Check authentication
+    // *** INÍCIO DA CORREÇÃO DE SINCRONIZAÇÃO ***
+    // Trocamos o loadUserData por um listener em tempo real (onSnapshot)
+    // que é ativado quando o estado de autenticação muda.
     React.useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged(async (user) => {
+        let unsubscribeFromFirestore = null; // Variável para guardar o listener do Firestore
+
+        // Ouve mudanças na autenticação (login/logout)
+        const unsubscribeFromAuth = auth.onAuthStateChanged(async (user) => {
             if (user) {
+                // --- Usuário está logado ---
                 setUser(user);
-                await loadUserData(user.uid);
+                
+                // Limpa qualquer listener antigo (segurança)
+                if (unsubscribeFromFirestore) {
+                    unsubscribeFromFirestore();
+                }
+
+                const docRef = db.collection('users').doc(user.uid);
+                
+                // Configura o OUVINTE EM TEMPO REAL (onSnapshot)
+                // Isso substitui o antigo 'loadUserData'
+                unsubscribeFromFirestore = docRef.onSnapshot(async (doc) => {
+                    if (doc.exists) {
+                        // 1. Dados do usuário existem, carrega no estado
+                        const data = doc.data();
+                        setUserData(data);
+                        setCurrentTheme(data.theme || 'taylorSwift');
+                    } else {
+                        // 2. Dados não existem (pode ser um usuário novo que falhou no index.html)
+                        //    Cria os dados de usuário padrão.
+                        console.log("Criando novo documento de usuário...");
+                        const newUserData = {
+                            score: 0,
+                            completedLektions: [],
+                            theme: 'taylorSwift',
+                            lektionProgress: {},
+                            exerciseStats: {},
+                            lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                        };
+                        await docRef.set(newUserData);
+                        // O 'onSnapshot' vai disparar de novo automaticamente após o 'set',
+                        // e o bloco 'if (doc.exists)' será executado, carregando os dados.
+                    }
+                    // 3. Para de mostrar o "loading"
+                    setLoading(false);
+                }, (error) => {
+                    // Em caso de erro ao ouvir
+                    console.error("Erro ao ouvir dados do usuário:", error);
+                    setLoading(false);
+                });
+
             } else {
-                window.location.href = 'index.html';
+                // --- Usuário está deslogado ---
+                setUser(null);
+                setUserData(null);
+                // Desconecta o ouvinte do Firestore
+                if (unsubscribeFromFirestore) {
+                    unsubscribeFromFirestore();
+                }
+                setLoading(false); // Para de carregar
+                window.location.href = 'index.html'; // Redireciona para login
             }
-            setLoading(false);
         });
 
-        return () => unsubscribe();
-    }, []);
+        // Função de limpeza do useEffect:
+        // Isso é chamado quando o componente é "desmontado" (app fechado)
+        return () => {
+            unsubscribeFromAuth(); // Para de ouvir a autenticação
+            if (unsubscribeFromFirestore) {
+                unsubscribeFromFirestore(); // Para de ouvir o Firestore
+            }
+        };
+    }, []); // O array vazio [] garante que este useEffect rode apenas uma vez
+
+    // *** FIM DA CORREÇÃO DE SINCRONIZAÇÃO ***
 
     // Initialize Lucide icons
     React.useEffect(() => {
@@ -54,35 +115,10 @@ const App = () => {
         }
     }, [currentView, showMenu, showGrammar, feedback]); // Re-run when view or modals change
 
-    // Load user data from Firestore
-    const loadUserData = async (uid) => {
-        try {
-            const docRef = db.collection('users').doc(uid);
-            const doc = await docRef.get();
-            
-            if (doc.exists) {
-                const data = doc.data();
-                setUserData(data);
-                setCurrentTheme(data.theme || 'taylorSwift');
-            } else {
-                // Initialize new user data
-                // ATUALIZADO: Adicionado lektionProgress
-                const newUserData = {
-                    score: 0,
-                    completedLektions: [],
-                    theme: 'taylorSwift',
-                    lektionProgress: {}, // <-- NOVO: Garante que o progresso exista
-                    exerciseStats: {},
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-                };
-                await docRef.set(newUserData);
-                setUserData(newUserData);
-            }
-        } catch (error) {
-            console.error('Error loading user data:', error);
-        }
-    };
+    
+    // (A função loadUserData foi removida pois sua lógica agora está no useEffect acima)
 
+    
     // Save user data to Firestore
     const saveUserData = async (data) => {
         if (!user) return;
@@ -104,7 +140,8 @@ const App = () => {
     const handleLogout = async () => {
         try {
             await auth.signOut();
-            window.location.href = 'index.html';
+            // O listener 'onAuthStateChanged' no useEffect vai detectar o logout
+            // e redirecionar para 'index.html'
         } catch (error) {
             console.error('Logout error:', error);
         }
@@ -113,29 +150,23 @@ const App = () => {
     // Change theme
     const changeTheme = async (themeName) => {
         setCurrentTheme(themeName);
-        // ATUALIZADO: Salva o tema no Firebase (como já fazia)
         await saveUserData({ theme: themeName });
         setShowMenu(false);
     };
 
     // Start Lektion
-    // ATUALIZADO: Esta função agora lê o progresso salvo
     const startLektion = (lektionId) => {
         const lektion = window.exercisesData.find(l => l.id === lektionId);
         if (lektion) {
-            // Lê o progresso salvo do userData
             const lektionProgress = userData?.lektionProgress || {};
-            // Encontra o índice salvo para esta lição, ou 0 se não houver
             let startIndex = lektionProgress[lektionId] || 0;
 
-            // Se o índice salvo for igual ou maior que o total (lição completa),
-            // reseta para 0 para permitir a revisão.
             if (startIndex >= lektion.exercises.length) {
                 startIndex = 0;
             }
 
             setCurrentLektion(lektion);
-            setCurrentExerciseIndex(startIndex); // <-- USA O ÍNDICE CORRETO
+            setCurrentExerciseIndex(startIndex); 
             setUserAnswer('');
             setFeedback(null);
             setCurrentView('exercise');
@@ -151,7 +182,6 @@ const App = () => {
         const correctAns = exercise.answer.toLowerCase();
         const alternatives = exercise.alternatives || [];
         
-        // Handle multi-part answers (e.g., "fährt|ab")
         const correctAnswers = [correctAns, ...alternatives.map(a => a.toLowerCase())];
         const isCorrect = correctAnswers.some(ans => {
             if (ans.includes('|')) {
@@ -168,39 +198,30 @@ const App = () => {
         });
 
         if (isCorrect) {
-            // Add points (só se for a primeira vez, mas a lógica de pontos pode ser refinada)
-            // Por enquanto, vamos manter simples
             const newScore = (userData?.score || 0) + 10;
-            // Salva a pontuação (não precisamos salvar o progresso aqui,
-            // salvamos no 'nextExercise')
             saveUserData({ score: newScore });
         }
     };
 
     // Next exercise
-    // ATUALIZADO: Esta função agora SALVA o progresso
     const nextExercise = () => {
         const lektionId = currentLektion.id;
 
-        // Verifica se NÃO é o último exercício
         if (currentExerciseIndex < currentLektion.exercises.length - 1) {
             const nextIndex = currentExerciseIndex + 1;
             setCurrentExerciseIndex(nextIndex);
             setUserAnswer('');
             setFeedback(null);
             
-            // SALVA O PROGRESSO NO FIREBASE
             const newProgress = { ...(userData.lektionProgress || {}), [lektionId]: nextIndex };
-            saveUserData({ lektionProgress: newProgress }); // Salva em segundo plano
+            saveUserData({ lektionProgress: newProgress }); 
             
         } else {
-            // Se for o último, chama finishLektion
             finishLektion();
         }
     };
 
     // Finish Lektion
-    // ATUALIZADO: Esta função agora salva o status de "completo"
     const finishLektion = async () => {
         if (!currentLektion || !userData) return;
         
@@ -212,10 +233,8 @@ const App = () => {
             completedLektions.push(lektionId);
         }
         
-        // Salva o índice final (igual ao total de exercícios) para marcar como "completo"
         const newProgress = { ...(userData.lektionProgress || {}), [lektionId]: currentLektion.exercises.length };
         
-        // Salva o status de completo E o progresso final
         await saveUserData({ 
             completedLektions: completedLektions, 
             lektionProgress: newProgress 
@@ -325,28 +344,24 @@ const App = () => {
         const completedCount = userData?.completedLektions?.length || 0;
         const progress = (completedCount / totalLektions) * 100;
 
-        // ATUALIZADO: Encontra a próxima lição para começar/continuar
         const nextLektion = React.useCallback(() => {
             const completed = userData?.completedLektions || [];
             const progress = userData?.lektionProgress || {};
 
-            // 1. Tenta encontrar uma lição em progresso (nem 0, nem completa)
             for (const lektion of window.exercisesData) {
                 const lektionId = lektion.id;
                 const savedIndex = progress[lektionId] || 0;
                 if (savedIndex > 0 && savedIndex < lektion.exercises.length) {
-                    return lektion; // Encontrou uma lição em progresso
+                    return lektion; 
                 }
             }
 
-            // 2. Se não houver, encontra a primeira lição não completada
             for (const lektion of window.exercisesData) {
                 if (!completed.includes(lektion.id)) {
-                    return lektion; // Encontrou a próxima lição
+                    return lektion; 
                 }
             }
             
-            // 3. Se todas estiverem completas, retorna a primeira para revisar
             return window.exercisesData[0];
         }, [userData]);
 
@@ -394,7 +409,6 @@ const App = () => {
                         background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                     }}
                 >
-                    {/* ATUALIZADO: Texto do botão é dinâmico */}
                     {
                         (userData?.lektionProgress && userData.lektionProgress[lektionToStart.id] > 0) ? 
                         `Continuar: ${lektionToStart.title} →` :
@@ -417,11 +431,8 @@ const App = () => {
                 
                 {window.exercisesData.map((lektion, index) => {
                     const isCompleted = completedLektions.includes(lektion.id);
-                    // Lógica de bloqueio: o primeiro (index 0) nunca está bloqueado
-                    // Os outros estão bloqueados se a *lição anterior* não estiver completa
                     const isLocked = index > 0 && !completedLektions.includes(window.exercisesData[index - 1].id);
                     
-                    // ATUALIZADO: Verifica se a lição está em progresso
                     const lektionProgress = userData?.lektionProgress || {};
                     const savedIndex = lektionProgress[lektion.id] || 0;
                     const isInProgress = savedIndex > 0 && savedIndex < lektion.exercises.length;
@@ -456,7 +467,6 @@ const App = () => {
                                             color: theme.text
                                         }}
                                     >
-                                        {/* ATUALIZADO: Texto do botão dinâmico */}
                                         {isCompleted ? 'Revisar' : (isInProgress ? 'Continuar' : 'Iniciar')}
                                     </button>
                                 )}
@@ -475,7 +485,6 @@ const App = () => {
         const totalExercises = window.exercisesData.reduce((sum, l) => sum + l.exercises.length, 0);
         const progress = (completedCount / totalLektions) * 100;
 
-        // ATUALIZADO: Calcula exercícios feitos
         const lektionProgress = userData?.lektionProgress || {};
         const exercisesDone = Object.values(lektionProgress).reduce((sum, count) => sum + count, 0);
 
@@ -509,7 +518,6 @@ const App = () => {
 
                     <div className="card stat-card" style={{ backgroundColor: theme.card }}>
                         <div className="stat-number" style={{ color: theme.accent }}>
-                            {/* ATUALIZADO: Mostra exercícios feitos vs total */}
                             {exercisesDone}/{totalExercises}
                         </div>
                         <div className="stat-label">Exercícios Feitos</div>
@@ -563,10 +571,8 @@ const App = () => {
         if (!currentLektion) return null;
 
         const exercise = currentLektion.exercises[currentExerciseIndex];
-        // ATUALIZADO: O progresso agora é baseado no índice atual, não no +1
         const progress = (currentExerciseIndex / currentLektion.exercises.length) * 100;
 
-        // Auto-focus input when exercise changes
         React.useEffect(() => {
             if (inputRef.current && !feedback) {
                 inputRef.current.focus();
@@ -597,7 +603,7 @@ const App = () => {
                         <div 
                             className="progress-fill"
                             style={{ 
-                                width: `${progress}%`, // A barra começa vazia no ex 1
+                                width: `${progress}%`, 
                                 background: `linear-gradient(90deg, ${theme.primary}, ${theme.accent})`
                             }}
                         ></div>
@@ -713,13 +719,12 @@ const App = () => {
                         ) : (
                             <button 
                                 className="btn-primary"
-                                onClick={nextExercise} // Esta função agora lida com os dois casos
+                                onClick={nextExercise} 
                                 style={{ 
                                     flex: 1,
                                     background: `linear-gradient(135deg, ${theme.primary}, ${theme.accent})`
                                 }}
                             >
-                                {/* ATUALIZADO: O botão "Finalizar Lição" chama a mesma função */}
                                 {currentExerciseIndex < currentLektion.exercises.length - 1 ? 'Próximo →' : 'Finalizar Lição 🎉'}
                             </button>
                         )}
@@ -823,7 +828,6 @@ const App = () => {
                                 <h3 style={{ fontSize: '1.3rem', marginBottom: 10, color: theme.accent }}>
                                     {explanation.title}
                                 </h3>
-                                {/* ATUALIZADO: Renderiza o HTML das explicações */}
                                 <div 
                                     style={{ 
                                         lineHeight: 1.6,
@@ -855,3 +859,4 @@ const App = () => {
 
 // Render the app
 ReactDOM.render(<App />, document.getElementById('root'));
+
