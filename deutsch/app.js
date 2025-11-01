@@ -1,5 +1,4 @@
 // app.js - Aplicativo React Completo
-// VERSÃO CORRIGIDA E ESTÁVEL
 
 // Firebase Configuration
 const firebaseConfig = {
@@ -48,12 +47,12 @@ const App = () => {
         return () => unsubscribe();
     }, []);
 
-    // Initialize Lucide icons (lógica original estável)
+    // Initialize Lucide icons only once
     React.useEffect(() => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    }, [currentView]); // Só recarrega ao mudar de aba
+    }, [currentView]); // Only re-run when view changes
 
     // Load user data from Firestore
     const loadUserData = async (uid) => {
@@ -63,16 +62,6 @@ const App = () => {
             
             if (doc.exists) {
                 const data = doc.data();
-                
-                // *** CORREÇÃO LIÇÃO NÃO ABRE ***
-                // Garante que os campos de progresso existam, mesmo em usuários antigos.
-                if (!data.completedLektions) {
-                    data.completedLektions = [];
-                }
-                if (!data.currentLektionProgress) {
-                    data.currentLektionProgress = {};
-                }
-                
                 setUserData(data);
                 setCurrentTheme(data.theme || 'taylorSwift');
             } else {
@@ -80,9 +69,8 @@ const App = () => {
                 const newUserData = {
                     score: 0,
                     completedLektions: [],
-                    currentLektionProgress: {}, // <-- Campo de progresso adicionado
                     theme: 'taylorSwift',
-                    exerciseStats: {}, // <-- Campo original mantido
+                    exerciseStats: {},
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 };
                 await docRef.set(newUserData);
@@ -98,13 +86,10 @@ const App = () => {
         if (!user) return;
         
         try {
-            // *** CORREÇÃO SINCRONIZAÇÃO DE TEMA E PROGRESSO ***
-            // Usa .set({ merge: true }) para ser mais robusto que .update()
-            await db.collection('users').doc(user.uid).set({
+            await db.collection('users').doc(user.uid).update({
                 ...data,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true }); // <-- Garante que vai criar ou atualizar, nunca falhar
-            
+            });
             setUserData(prev => ({ ...prev, ...data }));
         } catch (error) {
             console.error('Error saving data:', error);
@@ -124,35 +109,16 @@ const App = () => {
     // Change theme
     const changeTheme = async (themeName) => {
         setCurrentTheme(themeName);
-        await saveUserData({ theme: themeName }); // Agora usa a função .set() corrigida
+        await saveUserData({ theme: themeName });
         setShowMenu(false);
     };
 
     // Start Lektion
     const startLektion = (lektionId) => {
-        // Guarda de segurança: não faz nada se os dados do usuário
-        // ainda não foram carregados.
-        if (!userData) {
-            console.warn("User data not loaded yet, please wait.");
-            return;
-        }
-
         const lektion = window.exercisesData.find(l => l.id === lektionId);
         if (lektion) {
-            // Agora isso é seguro, pois 'loadUserData' garantiu que os campos existem
-            const isReview = userData.completedLektions.includes(lektionId);
-            
-            let startIndex = 0;
-            if (!isReview) {
-                // Continua de onde parou
-                const savedIndex = userData.currentLektionProgress?.[lektionId];
-                if (savedIndex && savedIndex < lektion.exercises.length) {
-                    startIndex = savedIndex;
-                }
-            }
-            
             setCurrentLektion(lektion);
-            setCurrentExerciseIndex(startIndex); // <-- Começa do índice salvo ou de 0
+            setCurrentExerciseIndex(0);
             setUserAnswer('');
             setFeedback(null);
             setCurrentView('exercise');
@@ -192,21 +158,13 @@ const App = () => {
     };
 
     // Next exercise
-    const nextExercise = async () => {
-        const nextIndex = currentExerciseIndex + 1;
-
-        if (nextIndex < currentLektion.exercises.length) {
-            // Se a lição NÃO terminou, salva o progresso e avança
-            setCurrentExerciseIndex(nextIndex);
+    const nextExercise = () => {
+        if (currentExerciseIndex < currentLektion.exercises.length - 1) {
+            setCurrentExerciseIndex(currentExerciseIndex + 1);
             setUserAnswer('');
             setFeedback(null);
-            
-            const newProgress = { ...(userData.currentLektionProgress || {}), [currentLektion.id]: nextIndex };
-            await saveUserData({ currentLektionProgress: newProgress });
-
         } else {
-            // Se a lição TERMINOU, chama finishLektion
-            await finishLektion();
+            finishLektion();
         }
     };
 
@@ -214,19 +172,11 @@ const App = () => {
     const finishLektion = async () => {
         if (!currentLektion || !userData) return;
         
-        const completedLektions = [...(userData.completedLektions || [])];
+        const completedLektions = userData.completedLektions || [];
         if (!completedLektions.includes(currentLektion.id)) {
             completedLektions.push(currentLektion.id);
+            await saveUserData({ completedLektions });
         }
-        
-        // Remove dos "em progresso"
-        const newProgress = { ...(userData.currentLektionProgress || {}) };
-        delete newProgress[currentLektion.id];
-        
-        await saveUserData({ 
-            completedLektions: completedLektions,
-            currentLektionProgress: newProgress 
-        });
         
         setCurrentLektion(null);
         setCurrentView('map');
@@ -383,7 +333,6 @@ const App = () => {
     // MAP VIEW
     function MapView() {
         const completedLektions = userData?.completedLektions || [];
-        const currentProgress = userData?.currentLektionProgress || {};
         
         return (
             <div>
@@ -393,16 +342,8 @@ const App = () => {
                 
                 {window.exercisesData.map((lektion, index) => {
                     const isCompleted = completedLektions.includes(lektion.id);
-                    const inProgressIndex = currentProgress[lektion.id];
                     const isLocked = index > 0 && !completedLektions.includes(window.exercisesData[index - 1].id);
                     
-                    let buttonText = 'Iniciar';
-                    if (isCompleted) {
-                        buttonText = 'Revisar';
-                    } else if (inProgressIndex > 0) {
-                        buttonText = 'Continuar'; 
-                    }
-
                     return (
                         <div 
                             key={lektion.id}
@@ -424,11 +365,6 @@ const App = () => {
                                 <span style={{ opacity: 0.7 }}>
                                     📝 {lektion.exercises.length} exercícios
                                 </span>
-                                {inProgressIndex > 0 && !isCompleted && (
-                                    <span style={{ opacity: 0.7, fontWeight: 600, color: theme.accent }}>
-                                        {inProgressIndex} / {lektion.exercises.length}
-                                    </span>
-                                )}
                                 {!isLocked && (
                                     <button 
                                         className="btn-secondary"
@@ -438,7 +374,7 @@ const App = () => {
                                             color: theme.text
                                         }}
                                     >
-                                        {buttonText} 
+                                        {isCompleted ? 'Revisar' : 'Iniciar'}
                                     </button>
                                 )}
                             </div>
