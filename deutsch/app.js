@@ -1,6 +1,5 @@
 // app.js - Lógica principal do App Deutsch A1.1 (Vanilla JS)
-// Estrutura inspirada no app.js do BookTracker
-// CORRIGIDO: Removido 'window.load' e adicionado 'safeCreateIcons'
+// CORREÇÃO: Exercícios agora são uma PÁGINA CHEIA, não um modal.
 
 // Importações do Firebase (SDK 9 modular)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
@@ -195,7 +194,7 @@ async function saveProfileData(dataToSave, showLoadingFeedback = true) {
     }
 }
 
-// --- SISTEMA DE MODAL (Inspirado no BookTracker) ---
+// --- SISTEMA DE MODAL (AGORA SÓ PARA GRAMÁTICA/LOADING) ---
 
 const modalContainer = document.getElementById('modal-container');
 const modalContent = document.getElementById('modal-content');
@@ -223,10 +222,10 @@ function hideModal() {
     modalContainer.classList.add('hidden');
     modalContent.innerHTML = '';
     
-    // Se estávamos em uma lição, volta para o mapa
-    if (window.location.hash.startsWith('#/lektion/')) {
-        window.location.hash = '#/map';
-    }
+    // REMOVIDO: Lógica de voltar ao mapa, pois o modal não é mais para lições
+    // if (window.location.hash.startsWith('#/lektion/')) {
+    //     window.location.hash = '#/map';
+    // }
 
     document.removeEventListener('keydown', handleEscKey);
 }
@@ -257,7 +256,8 @@ function showLoading(message = 'Carregando...') {
 
 // --- ROUTER (Inspirado no BookTracker) ---
 
-const pages = ['home', 'map', 'progress', 'settings'];
+// ADICIONADO 'exercise' às páginas
+const pages = ['home', 'map', 'progress', 'settings', 'exercise'];
 
 function hideAllPages() {
     pages.forEach(pageId => {
@@ -273,13 +273,10 @@ function router() {
     const currentHash = window.location.hash || '#/home';
     const [path, param] = currentHash.substring(2).split('/');
 
-    // Rotas de Modal (Lição, Menu)
-    if (path === 'lektion') {
-        renderLektionInModal(parseInt(param));
-        return; // Para a execução para manter o modal aberto
-    }
+    // REMOVIDA Rota de Modal para 'lektion'
+    
     if (path === 'menu') {
-        renderMenuInModal();
+        renderMenuInModal(); // AINDA PODE SER USADO PARA UM MENU FUTURO
         return;
     }
 
@@ -300,6 +297,8 @@ function router() {
             case 'map': renderMap(); break;
             case 'progress': renderProgress(); break;
             case 'settings': renderSettings(); break;
+            // ADICIONADA Rota para a página de exercício
+            case 'exercise': renderExercisePage(); break;
             default:
                 document.getElementById('page-home').classList.remove('hidden');
                 renderHome();
@@ -316,6 +315,14 @@ function router() {
 function updateNavLinks(activeHash) {
     document.querySelectorAll('.nav-link').forEach(link => {
         const linkHash = new URL(link.href, window.location.origin).hash;
+        
+        // Trata o caso da página de exercício (nenhum nav deve estar ativo)
+        if (activeHash.startsWith('#/exercise')) {
+             link.classList.remove('active');
+             link.classList.add('text-gray-400');
+             return;
+        }
+
         if (linkHash === activeHash) {
             link.classList.add('active');
             link.classList.remove('text-gray-400');
@@ -433,7 +440,8 @@ function renderMap() {
     document.querySelectorAll('.lektion-card:not(.locked)').forEach(card => {
         card.onclick = () => {
             const lektionId = card.dataset.lektionId;
-            window.location.hash = `#/lektion/${lektionId}`; // Abre a lição no modal
+            // MUDADO: Chama a função startLektion em vez de mudar o hash
+            startLektion(parseInt(lektionId));
         };
     });
     
@@ -547,13 +555,16 @@ function renderSettings() {
     };
 }
 
-// --- LÓGICA DE LIÇÃO E EXERCÍCIOS (NO MODAL) ---
+// --- LÓGICA DE LIÇÃO E EXERCÍCIOS (AGORA EM PÁGINA CHEIA) ---
 
-function renderLektionInModal(lektionId) {
+/**
+ * Inicia uma lição. Chamado pelo clique no mapa.
+ * Prepara o estado e navega para a página de exercício.
+ */
+function startLektion(lektionId) {
     const lektion = allLektions.find(l => l.id === lektionId);
     if (!lektion) {
-        hideModal();
-        window.location.hash = '#/map';
+        console.error("Lição não encontrada:", lektionId);
         return;
     }
 
@@ -563,15 +574,58 @@ function renderLektionInModal(lektionId) {
     userAnswer = '';
     feedback = null;
 
-    const modalTitle = `${lektion.title}`;
-    const modalContentHtml = `<div id="exercise-container"></div>`;
-    
-    showModal(modalTitle, modalContentHtml, '900px');
-    renderCurrentExercise();
+    // Navega para a página de exercício
+    window.location.hash = '#/exercise';
 }
 
-function renderCurrentExercise() {
-    const container = document.getElementById('exercise-container');
+/**
+ * Renderiza a PÁGINA de exercício (substitui renderLektionInModal)
+ */
+function renderExercisePage() {
+    const page = document.getElementById('page-exercise');
+
+    if (!currentLektion) {
+        page.innerHTML = `
+            <h2 class="text-2xl font-bold mb-4 text-red-500">Erro</h2>
+            <p class="text-gray-300 mb-6">Nenhuma lição está selecionada.</p>
+            <button id="back-to-map" class="btn-primary">Voltar ao Mapa</button>
+        `;
+        document.getElementById('back-to-map').onclick = () => window.location.hash = '#/map';
+        return;
+    }
+    
+    // O conteúdo agora é uma página inteira
+    page.innerHTML = `
+        <div class="exercise-page-header">
+            <button id="back-to-map-btn" class="btn-secondary" style="padding: 0.5rem 0.75rem;">
+                <i data-lucide="arrow-left" class="w-6 h-6"></i>
+            </button>
+            <div>
+                <h1 class="text-2xl md:text-3xl font-bold" style="color: var(--primary);">${currentLektion.title}</h1>
+                <p class="text-gray-400">Exercício ${currentExerciseIndex + 1} de ${currentLektion.exercises.length}</p>
+            </div>
+        </div>
+        <div id="exercise-container-page"></div>
+    `;
+    
+    document.getElementById('back-to-map-btn').onclick = () => {
+        // Confirmação para sair
+        // REMOVIDO: O confirm() não funciona bem no ambiente de iframe.
+        // if (confirm("Você tem certeza que quer sair? Seu progresso neste exercício não será salvo.")) {
+            currentLektion = null; // Limpa a lição atual
+            window.location.hash = '#/map';
+        // }
+    };
+    
+    safeCreateIcons();
+    renderCurrentExerciseOnPage(); // Renderiza o exercício atual dentro da página
+}
+
+/**
+ * Renderiza o exercício ATUAL dentro da página de exercício
+ */
+function renderCurrentExerciseOnPage() {
+    const container = document.getElementById('exercise-container-page');
     if (!container || !currentLektion) return;
 
     const exercise = currentLektion.exercises[currentExerciseIndex];
@@ -608,40 +662,42 @@ function renderCurrentExercise() {
 
     container.innerHTML = `
         <!-- Progresso -->
-        <p class="text-sm font-medium text-gray-400 mb-2">
-            Exercício ${currentExerciseIndex + 1} de ${currentLektion.exercises.length}
-        </p>
-        <div class="progress-bar mb-6">
-            <div class="progress-fill" style="width: ${progress}%;"></div>
+        <div class="card p-4 mb-6">
+            <div class="progress-bar" style="margin: 0;">
+                <div class="progress-fill" style="width: ${progress}%;"></div>
+            </div>
         </div>
 
-        <!-- Pergunta -->
-        <h3 class="text-xl font-medium mb-6">${exercise.question.replace(/___/g, '<span class="font-bold text-gray-400">___</span>')}</h3>
-        
-        <!-- Input -->
-        <div class="mb-4">${inputHtml}</div>
-        
-        <!-- Feedback -->
-        <div id="feedback-container">
-            ${feedback ? `
-                <div class="feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}">
-                    <i data-lucide="${feedback.isCorrect ? 'check-circle' : 'x-circle'}" class="w-8 h-8 flex-shrink-0"></i>
-                    <div>
-                        <strong class="block mb-1">${feedback.isCorrect ? 'Correto!' : 'Incorreto'}</strong>
-                        ${feedback.explanation}
+        <!-- Pergunta e Resposta -->
+        <div class="card p-6">
+            <!-- Pergunta -->
+            <h3 class="text-xl font-medium mb-6">${exercise.question.replace(/___/g, '<span class="font-bold text-gray-400">___</span>')}</h3>
+            
+            <!-- Input -->
+            <div class="mb-4">${inputHtml}</div>
+            
+            <!-- Feedback -->
+            <div id="feedback-container">
+                ${feedback ? `
+                    <div class="feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}">
+                        <i data-lucide="${feedback.isCorrect ? 'check-circle' : 'x-circle'}" class="w-8 h-8 flex-shrink-0"></i>
+                        <div>
+                            <strong class="block mb-1">${feedback.isCorrect ? 'Correto!' : 'Incorreto'}</strong>
+                            ${feedback.explanation}
+                        </div>
                     </div>
-                </div>
-            ` : ''}
-        </div>
-        
-        <!-- Botões de Ação -->
-        <div class="flex gap-4 mt-8 pt-6 border-t" style="border-color: var(--border);">
-            <button id="grammar-btn" class="btn-secondary">
-                <i data-lucide="book-open" class="w-5 h-5 mr-2"></i> Gramática
-            </button>
-            <button id="action-btn" class="btn-primary flex-grow" ${(!userAnswer && !feedback) ? 'disabled' : ''}>
-                ${feedback ? 'Próximo →' : 'Verificar'}
-            </button>
+                ` : ''}
+            </div>
+            
+            <!-- Botões de Ação -->
+            <div class="flex gap-4 mt-8 pt-6 border-t" style="border-color: var(--border);">
+                <button id="grammar-btn" class="btn-secondary">
+                    <i data-lucide="book-open" class="w-5 h-5 mr-2"></i> Gramática
+                </button>
+                <button id="action-btn" class="btn-primary flex-grow" ${(!userAnswer && !feedback) ? 'disabled' : ''}>
+                    ${feedback ? 'Próximo →' : 'Verificar'}
+                </button>
+            </div>
         </div>
     `;
 
@@ -662,17 +718,20 @@ function renderCurrentExercise() {
             btn.onclick = () => {
                 if (feedback) return;
                 userAnswer = btn.dataset.option;
-                renderCurrentExercise(); // Re-renderiza para mostrar a seleção
+                renderCurrentExerciseOnPage(); // Re-renderiza para mostrar a seleção
             };
         });
     }
     
-    document.getElementById('grammar-btn').onclick = showGrammarModal;
+    document.getElementById('grammar-btn').onclick = showGrammarModal; // Continua abrindo gramática no modal
     document.getElementById('action-btn').onclick = feedback ? nextExercise : checkAnswer;
     
     safeCreateIcons();
 }
 
+/**
+ * Abre o modal de gramática (sem alterações)
+ */
 function showGrammarModal() {
     if (!currentLektion) return;
 
@@ -694,6 +753,9 @@ function showGrammarModal() {
     showModal("Explicações Gramaticais 📚", grammarHtml, '900px');
 }
 
+/**
+ * Verifica a resposta (sem alterações, mas agora re-renderiza a PÁGINA)
+ */
 function checkAnswer() {
     if (!userAnswer) return;
     
@@ -725,24 +787,30 @@ function checkAnswer() {
         saveProfileData({ score: newScore }, false); // Salva no FB sem loading
     }
     
-    renderCurrentExercise(); // Re-renderiza com o feedback
+    renderCurrentExerciseOnPage(); // MUDADO: Renderiza na página
 }
 
+/**
+ * Avança para o próximo exercício (sem alterações)
+ */
 async function nextExercise() {
     if (currentExerciseIndex < currentLektion.exercises.length - 1) {
         // Próximo exercício
         currentExerciseIndex++;
         userAnswer = '';
         feedback = null;
-        renderCurrentExercise();
+        renderCurrentExerciseOnPage(); // MUDADO: Renderiza na página
     } else {
         // Finalizou a lição
         await finishLektion();
     }
 }
 
+/**
+ * Finaliza a lição (agora navega para o mapa)
+ */
 async function finishLektion() {
-    showLoading("Salvando progresso...");
+    showLoading("Salvando progresso..."); // USA O MODAL para loading
     
     const completed = userProfile.completedLektions || [];
     if (!completed.includes(currentLektion.id)) {
@@ -751,7 +819,8 @@ async function finishLektion() {
         await saveProfileData({ completedLektions: completed }, false); // Salva no FB
     }
     
-    hideModal(); // Fecha o modal da lição
+    hideModal(); // Fecha o modal de "Salvando..."
+    currentLektion = null; // Limpa a lição
     window.location.hash = '#/map'; // Volta para o mapa
     // O router vai rodar e re-renderizar o mapa com a lição completa
 }
@@ -760,4 +829,5 @@ async function finishLektion() {
 // Executa o initFirebase assim que o script for lido,
 // como ele está no fim do <body>, o DOM estará pronto.
 initFirebase();
+
 
