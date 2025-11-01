@@ -133,11 +133,12 @@ primary: '#1BAEC6', // Turquesa/Azul-água
     
     showgirl: {
 name: 'TLOAS',
-        primary: '#fffaf5',  // Cor clara (antigo fundo)
-        bg: '#ff6b35',      // Fundo laranja (antiga primária)
-        text: '#2d1f1a',
-        card: '#fff0e6',
-        accent: '#00b894',
-        border: '#ffd4b3'
+primary: '#E57118', // Laranja principal (predominante)
+        bg: '#fffaf5',      // Fundo neutro claro (mantido para legibilidade)
+        text: '#55703E',      // Verde escuro (como sugerido para o texto)
+        card: '#FFFFFF',      // Fundo do card branco (para máximo contraste do texto)
+        accent: '#61B498',    // O tom de verde/azul (teal)
+        border: '#F28C42'     // Laranja mais claro para bordas
+        // Opcional: Você pode usar o '#A64416' (laranja escuro) para títulos
     }
 };
