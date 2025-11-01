@@ -188,14 +188,18 @@ const App = () => {
         }
     };
 
-    // Finish Lektion
+// Finish Lektion
     const finishLektion = async () => {
         if (!currentLektion || !userData) return;
         
         const completedLektions = userData.completedLektions || [];
         if (!completedLektions.includes(currentLektion.id)) {
-            completedLektions.push(currentLektion.id);
-            await saveUserData({ completedLektions });
+            
+            // CORREÇÃO: Criamos um novo array usando 'spread syntax' (...)
+            const newCompletedLektions = [...completedLektions, currentLektion.id];
+            
+            // Passamos o novo array para ser salvo
+            await saveUserData({ completedLektions: newCompletedLektions });
         }
         
         setCurrentLektion(null);
