@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deutsch A1.1 - Login</title>
+    <title>Login - Deutsch A1.1</title>
     <style>
         * {
             margin: 0;
@@ -25,13 +25,13 @@
             background: white;
             border-radius: 20px;
             padding: 40px;
-            max-width: 500px;
+            max-width: 400px;
             width: 100%;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            text-align: center;
         }
 
         .logo {
-            text-align: center;
             margin-bottom: 30px;
         }
 
@@ -60,7 +60,6 @@
             justify-content: center;
             gap: 10px;
             transition: all 0.3s ease;
-            margin-bottom: 30px;
         }
 
         .google-btn:hover {
@@ -69,57 +68,43 @@
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
         }
 
-        .theme-selector {
-            margin-top: 30px;
-        }
-
-        .theme-selector h3 {
-            margin-bottom: 15px;
-            color: #333;
-            font-size: 1.1rem;
-        }
-
-        .theme-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-        }
-
-        .theme-option {
-            padding: 12px;
-            border: 2px solid #ddd;
-            border-radius: 10px;
-            cursor: pointer;
-            text-align: center;
-            font-size: 0.85rem;
-            font-weight: 500;
-            transition: all 0.2s ease;
-        }
-
-        .theme-option:hover {
-            transform: scale(1.05);
-            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        .theme-option.selected {
-            border-width: 3px;
-            font-weight: 700;
+        .google-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .loading {
-            text-align: center;
-            color: #666;
             margin-top: 20px;
+            color: #667eea;
+            display: none;
         }
 
-        @media (max-width: 480px) {
-            .login-container {
-                padding: 30px 20px;
-            }
+        .loading.active {
+            display: block;
+        }
 
-            .theme-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            display: inline-block;
+            animation: spin 1s linear infinite;
+            font-size: 1.5rem;
+        }
+
+        .error-message {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fee;
+            border: 1px solid #fcc;
+            border-radius: 8px;
+            color: #c33;
+            display: none;
+        }
+
+        .error-message.active {
+            display: block;
         }
     </style>
 </head>
@@ -127,7 +112,7 @@
     <div class="login-container">
         <div class="logo">
             <h1>🇩🇪 Deutsch</h1>
-            <p>Aprenda alemão de forma divertida</p>
+            <p>Aprenda alemão A1.1</p>
         </div>
 
         <button id="loginBtn" class="google-btn">
@@ -140,24 +125,19 @@
             Entrar com Google
         </button>
 
-        <div class="theme-selector">
-            <h3>Escolha seu tema:</h3>
-            <div class="theme-grid" id="themeGrid"></div>
+        <div id="loading" class="loading">
+            <span class="spinner">⏳</span>
+            <p>Entrando...</p>
         </div>
 
-        <div id="loading" class="loading" style="display: none;">
-            Carregando...
-        </div>
+        <div id="errorMessage" class="error-message"></div>
     </div>
 
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    <!-- Firebase v12.5.0 -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
 
-    <script src="themes.js"></script>
-
-    <script>
-        // Firebase Configuration
         const firebaseConfig = {
             apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
             authDomain: "deutsch-39779.firebaseapp.com",
@@ -168,86 +148,38 @@
             measurementId: "G-XYVLCZD740"
         };
 
-        // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
 
-        // Selected theme
-        let selectedTheme = 'taylorSwift';
+        const loginBtn = document.getElementById('loginBtn');
+        const loading = document.getElementById('loading');
+        const errorMessage = document.getElementById('errorMessage');
 
-        // Render theme grid
-        function renderThemes() {
-            const grid = document.getElementById('themeGrid');
-            Object.keys(window.themes).forEach(themeName => {
-                const theme = window.themes[themeName];
-                const div = document.createElement('div');
-                div.className = 'theme-option';
-                if (themeName === selectedTheme) {
-                    div.classList.add('selected');
-                }
-                div.textContent = theme.name;
-                div.style.backgroundColor = theme.primary;
-                div.style.color = theme.text;
-                div.style.borderColor = theme.primary;
-                
-                div.onclick = () => {
-                    selectedTheme = themeName;
-                    document.querySelectorAll('.theme-option').forEach(el => {
-                        el.classList.remove('selected');
-                    });
-                    div.classList.add('selected');
-                };
-                
-                grid.appendChild(div);
-            });
-        }
-
-        // Google Sign In
-        document.getElementById('loginBtn').addEventListener('click', async () => {
-            const loading = document.getElementById('loading');
-            loading.style.display = 'block';
-            
-            try {
-                const provider = new firebase.auth.GoogleAuthProvider();
-                const result = await auth.signInWithPopup(provider);
-                const user = result.user;
-
-                // --- INÍCIO DA MODIFICAÇÃO ---
-
-                // ANTES (Causava a race condition):
-                /* await db.collection('users').doc(user.uid).set({
-                    email: user.email,
-                    displayName: user.displayName,
-                    theme: selectedTheme,
-                    lastLogin: firebase.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
-                */
-
-                // DEPOIS (Corrigido):
-                // Apenas salve o tema no localStorage. O app.js cuidará de criar o usuário no DB.
-                localStorage.setItem('selectedTheme', selectedTheme);
-
-                // --- FIM DA MODIFICAÇÃO ---
-
-                // Redirect to app
-                window.location.href = 'app.html';
-            } catch (error) {
-                console.error('Login error:', error);
-                alert('Erro ao fazer login. Tente novamente.');
-                loading.style.display = 'none';
-            }
-        });
-
-        // Check if user is already logged in
-        auth.onAuthStateChanged((user) => {
+        // Verificar se usuário já está logado
+        onAuthStateChanged(auth, (user) => {
             if (user) {
                 window.location.href = 'app.html';
             }
         });
 
-        // Initialize
-        renderThemes();
+        // Login com Google
+        loginBtn.addEventListener('click', async () => {
+            loginBtn.disabled = true;
+            loading.classList.add('active');
+            errorMessage.classList.remove('active');
+
+            try {
+                const provider = new GoogleAuthProvider();
+                await signInWithPopup(auth, provider);
+                // onAuthStateChanged vai redirecionar
+            } catch (error) {
+                console.error('Erro no login:', error);
+                loginBtn.disabled = false;
+                loading.classList.remove('active');
+                errorMessage.textContent = `Erro: ${error.message}`;
+                errorMessage.classList.add('active');
+            }
+        });
     </script>
 </body>
 </html>
