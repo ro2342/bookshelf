@@ -1,9 +1,9 @@
 // app.js - Lógica principal do App Deutsch A1.1 (Vanilla JS)
-// CORREÇÃO: Exercícios agora são uma PÁGINA CHEIA, não um modal.
+// ATUALIZAÇÃO: Implementa a barra de navegação "Liquid Glass"
 
 // Importações do Firebase (SDK 9 modular)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js";
-import { getFirestore, doc, onSnapshot, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
+import { getFirestore, doc, onSnapshot, setDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js";
 import { getAuth, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js";
 
 // --- CONFIGURAÇÃO E INICIALIZAÇÃO ---
@@ -26,6 +26,7 @@ let profileUnsubscribe = () => {};
 let userProfile = {
     score: 0,
     completedLektions: [],
+    inProgressLektions: {}, // Salva o progresso no meio da lição
     theme: 'taylorSwift',
     name: 'Estudante',
     avatarUrl: ''
@@ -33,7 +34,6 @@ let userProfile = {
 let currentTheme = 'taylorSwift';
 
 // Dados estáticos (carregados pelos scripts no app.html)
-// Se os arquivos JS não carregarem, estes serão arrays/objetos vazios.
 const allLektions = window.exercisesData || [];
 const allGrammar = window.grammarExplanations || {};
 const allThemes = window.themes || {};
@@ -46,12 +46,15 @@ let feedback = null;
 
 // --- FUNÇÃO DE AJUDA PARA ÍCONES ---
 /**
- * Executa o lucide.createIcons() de forma segura, evitando erros
- * caso a biblioteca de ícones falhe ao carregar.
+ * Executa o lucide.createIcons() de forma segura.
  */
 function safeCreateIcons() {
     if (window.lucide) {
-        lucide.createIcons();
+        try {
+            lucide.createIcons();
+        } catch (error) {
+            console.warn("Erro ao criar ícones Lucide:", error.message);
+        }
     } else {
         console.warn('Biblioteca de ícones (Lucide) não carregou a tempo.');
     }
@@ -66,7 +69,6 @@ function initFirebase() {
         db = getFirestore(app);
         auth = getAuth(app);
         
-        // Pega o tema salvo no localStorage (se houver) para evitar flash
         const savedTheme = localStorage.getItem('deutschAppTheme');
         if (savedTheme && allThemes[savedTheme]) {
             applyTheme(savedTheme, false);
@@ -74,29 +76,36 @@ function initFirebase() {
 
         onAuthStateChanged(auth, (user) => {
             if (user) {
-                // Usuário está logado
                 userId = user.uid;
                 localStorage.setItem('deutschAppUserId', userId);
-                initializeAppLogic(); // <--- Inicia o app
+                initializeAppLogic();
             } else {
-                // Usuário não está logado
                 localStorage.removeItem('deutschAppUserId');
-                window.location.href = 'index.html'; // Redireciona para o login
+                window.location.href = 'index.html';
             }
         });
 
     } catch (error) {
         console.error("Erro ao inicializar Firebase:", error);
-        document.body.innerHTML = `<h1>Erro crítico ao carregar o Firebase. Verifique o console e tente recarregar a página.</h1><p>${error.message}</p>`;
+        document.body.innerHTML = `<h1>Erro crítico ao carregar o Firebase. Verifique o console.</h1><p>${error.message}</p>`;
     }
 }
 
 // Inicia a lógica principal do app
 function initializeAppLogic() {
     console.log("App lógico iniciado para o usuário:", userId);
-    // Esconde o loader SÓ DEPOIS que os dados do perfil carregarem (movido para listenToProfile)
-    listenToProfile(); // Começa a ouvir os dados do usuário
-    window.addEventListener('hashchange', router); // Ouve mudanças no hash (navegação)
+    
+    // ATUALIZAÇÃO: Adiciona CSS dinâmico para legibilidade dos temas
+    const styleSheet = document.createElement("style");
+    styleSheet.type = "text/css";
+    styleSheet.innerText = `.text-secondary { color: var(--text); opacity: 0.7; }`;
+    document.head.appendChild(styleSheet);
+    
+    listenToProfile();
+    window.addEventListener('hashchange', router);
+    
+    // Adiciona o listener para o "popstate" (botão de voltar do navegador)
+    window.addEventListener('popstate', router);
 }
 
 // --- SISTEMA DE TEMAS (Inspirado no BookTracker) ---
@@ -115,13 +124,18 @@ function applyTheme(themeName, saveToDb = true) {
     document.documentElement.style.setProperty('--card', theme.card);
     document.documentElement.style.setProperty('--text', theme.text);
     document.documentElement.style.setProperty('--border', theme.border);
+    
+    // ATUALIZAÇÃO: Adiciona valores RGB para o "Glassmorphism"
+    document.documentElement.style.setProperty('--text-rgb', theme['text-rgb'] || '45, 32, 51');
+    document.documentElement.style.setProperty('--card-rgb', theme['card-rgb'] || '240, 230, 255');
+    document.documentElement.style.setProperty('--border-rgb', theme['border-rgb'] || '216, 195, 232');
+
 
     currentTheme = themeName;
     localStorage.setItem('deutschAppTheme', themeName);
 
-    // Salva a preferência no Firestore
     if (saveToDb && userId) {
-        saveProfileData({ theme: themeName }, false); // Salva sem mostrar loading
+        saveProfileData({ theme: themeName }, false);
     }
 }
 
@@ -129,15 +143,15 @@ function applyTheme(themeName, saveToDb = true) {
 
 // Ouve as mudanças no perfil do usuário
 function listenToProfile() {
-    if (profileUnsubscribe) profileUnsubscribe(); // Cancela o listener anterior
+    if (profileUnsubscribe) profileUnsubscribe();
     if (!userId) return;
 
     const profileDocRef = doc(db, "users", userId, "profile", "data");
     
-    profileUnsubscribe = onSnapshot(profileDocRef, (doc) => {
+    profileUnsubscribe = onSnapshot(profileDocRef, (docSnap) => {
         const googleUser = auth.currentUser;
-        if (doc.exists()) {
-            const data = doc.data();
+        if (docSnap.exists()) {
+            const data = docSnap.data();
             userProfile = {
                 ...userProfile, // Mantém padrões
                 ...data, // Sobrescreve com dados do FB
@@ -146,26 +160,25 @@ function listenToProfile() {
             };
             console.log("Perfil do usuário carregado:", userProfile);
         } else {
-            // Se não existe, cria um perfil básico
             console.log("Nenhum perfil encontrado, criando um novo...");
             userProfile = {
                 score: 0,
                 completedLektions: [],
+                inProgressLektions: {},
                 theme: 'taylorSwift',
                 name: googleUser?.displayName || 'Estudante',
                 avatarUrl: googleUser?.photoURL || '',
                 uid: userId,
                 email: googleUser?.email || ''
             };
-            saveProfileData(userProfile, false); // Salva o novo perfil
+            // Usa setDoc para criar o documento
+            saveProfileData(userProfile, false); 
         }
         
-        // Aplica o tema carregado do perfil
         applyTheme(userProfile.theme || 'taylorSwift', false);
         
-        // **IMPORTANTE**: Esconde o loader e renderiza a página SÓ AGORA
         document.getElementById('page-loader').classList.add('hidden');
-        router(); 
+        router(); // Roda o router pela primeira vez
     }, (error) => {
         console.error("Erro ao ouvir perfil:", error);
         document.getElementById('page-loader').innerHTML = `<p class="text-red-500">Erro ao carregar perfil: ${error.message}</p>`;
@@ -180,38 +193,41 @@ async function saveProfileData(dataToSave, showLoadingFeedback = true) {
     if (showLoadingFeedback) showLoading("Salvando...");
 
     try {
+        // Usa setDoc com merge: true para criar ou atualizar
         await setDoc(profileDocRef, {
             ...dataToSave,
             lastUpdated: serverTimestamp()
-        }, { merge: true }); // Merge: true para não apagar dados existentes
+        }, { merge: true }); 
         
         if (showLoadingFeedback) hideModal();
         console.log("Dados salvos com sucesso:", dataToSave);
-    } catch (error) {
+    } catch (error)
+    {
         console.error("Erro ao salvar dados do perfil:", error);
         if (showLoadingFeedback) hideModal();
         showModal("Erro ao Salvar", `Não foi possível salvar seu progresso: ${error.message}`);
     }
 }
 
-// --- SISTEMA DE MODAL (AGORA SÓ PARA GRAMÁTICA/LOADING) ---
+// --- SISTEMA DE MODAL (Gramática, Loading) ---
 
 const modalContainer = document.getElementById('modal-container');
 const modalContent = document.getElementById('modal-content');
 
-function showModal(title, contentHtml, maxWidth = '600px') {
+function showModal(title, contentHtml) {
+    // ATUALIZAÇÃO: O estilo agora é controlado pelo CSS
     modalContent.innerHTML = `
-        <button id="modal-close-btn" class="modal-close-btn">
-            <i data-lucide="x" class="w-6 h-6"></i>
+        <button id="modal-close-btn">
+            <i data-lucide="x" class="w-5 h-5"></i>
         </button>
-        <h2 class="text-2xl font-bold mb-6" style="color: var(--primary);">${title}</h2>
-        <div id="modal-body">${contentHtml}</div>
+        <div id="modal-body" class="mt-4">
+             <h3 class="text-xl font-bold mb-4" style="color: var(--primary);">${title}</h3>
+            ${contentHtml}
+        </div>
     `;
-    modalContent.style.maxWidth = maxWidth;
     modalContainer.classList.remove('hidden');
-    safeCreateIcons(); // Recria ícones dentro do modal
+    safeCreateIcons();
 
-    // Adiciona listeners
     modalContainer.addEventListener('click', hideModal);
     modalContent.addEventListener('click', (e) => e.stopPropagation());
     document.getElementById('modal-close-btn').addEventListener('click', hideModal);
@@ -221,12 +237,6 @@ function showModal(title, contentHtml, maxWidth = '600px') {
 function hideModal() {
     modalContainer.classList.add('hidden');
     modalContent.innerHTML = '';
-    
-    // REMOVIDO: Lógica de voltar ao mapa, pois o modal não é mais para lições
-    // if (window.location.hash.startsWith('#/lektion/')) {
-    //     window.location.hash = '#/map';
-    // }
-
     document.removeEventListener('keydown', handleEscKey);
 }
 
@@ -237,28 +247,24 @@ function handleEscKey(event) {
 }
 
 function showLoading(message = 'Carregando...') {
+    // Usa o mesmo estilo de modal para consistência
     modalContent.innerHTML = `
-        <div class="flex flex-col items-center justify-center p-8 text-center">
-            <svg class="animate-spin h-8 w-8 text-white mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <div class="flex flex-col items-center justify-center p-8 text-center" style="color: var(--text);">
+            <svg class="animate-spin h-8 w-8 mb-4" style="color: var(--primary);" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
             <p class="text-lg font-medium">${message}</p>
         </div>
     `;
-    modalContent.style.maxWidth = '300px';
     modalContainer.classList.remove('hidden');
     
-    // Remove listeners de fechar
     modalContainer.removeEventListener('click', hideModal);
     document.removeEventListener('keydown', handleEscKey);
 }
 
-
-
 // --- ROUTER (Inspirado no BookTracker) ---
 
-// ADICIONADO 'exercise' às páginas
 const pages = ['home', 'map', 'progress', 'settings', 'exercise'];
 
 function hideAllPages() {
@@ -266,30 +272,25 @@ function hideAllPages() {
         const pageEl = document.getElementById(`page-${pageId}`);
         if (pageEl) pageEl.classList.add('hidden');
     });
-    // Não mexemos no loader aqui, ele é controlado pelo listenToProfile
 }
 
 function router() {
-    if (!userId) return; // Não faz nada se os dados do usuário ainda não carregaram
+    if (!userId) return; 
 
     const currentHash = window.location.hash || '#/home';
-    const [path, param] = currentHash.substring(2).split('/');
-
-    // REMOVIDA Rota de Modal para 'lektion'
+    const [path] = currentHash.substring(2).split('/');
     
     if (path === 'menu') {
-        renderMenuInModal(); // AINDA PODE SER USADO PARA UM MENU FUTURO
+        // Lógica de menu modal (se necessário)
         return;
     }
 
-    // Se nenhuma rota de modal foi ativada, garante que o modal esteja fechado
     if (!modalContainer.classList.contains('hidden')) {
         hideModal();
     }
 
-    // Rotas de Página
     hideAllPages();
-    updateNavLinks(currentHash);
+    updateNavLinks(path || 'home'); // ATUALIZADO: Passa só o 'path'
 
     const targetPage = document.getElementById(`page-${path}`);
     if (targetPage) {
@@ -299,41 +300,63 @@ function router() {
             case 'map': renderMap(); break;
             case 'progress': renderProgress(); break;
             case 'settings': renderSettings(); break;
-            // ADICIONADA Rota para a página de exercício
             case 'exercise': renderExercisePage(); break;
             default:
                 document.getElementById('page-home').classList.remove('hidden');
                 renderHome();
         }
     } else {
-        // Fallback para home
         document.getElementById('page-home').classList.remove('hidden');
         renderHome();
     }
     
-    safeCreateIcons(); // Atualiza ícones na página
+    safeCreateIcons();
 }
 
-function updateNavLinks(activeHash) {
-    document.querySelectorAll('.nav-link').forEach(link => {
-        const linkHash = new URL(link.href, window.location.origin).hash;
-        
-        // Trata o caso da página de exercício (nenhum nav deve estar ativo)
-        if (activeHash.startsWith('#/exercise')) {
-             link.classList.remove('active');
-             link.classList.add('text-gray-400');
-             return;
-        }
+// --- ATUALIZAÇÃO: LÓGICA DA BARRA DE NAVEGAÇÃO "LIQUID GLASS" ---
 
-        if (linkHash === activeHash) {
+function updateNavLinks(activePath) {
+    const navContainer = document.querySelector('.liquid-nav');
+    if (!navContainer) return;
+
+    let activeLinkEl = null;
+
+    // 1. Remove a classe 'active' de todos e encontra o link ativo
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+        if (link.dataset.linkId === activePath) {
+            activeLinkEl = link;
             link.classList.add('active');
-            link.classList.remove('text-gray-400');
-        } else {
-            link.classList.remove('active');
-            link.classList.add('text-gray-400');
         }
     });
+
+    // 2. Move a pílula líquida
+    moveLiquidPill(activeLinkEl);
 }
+
+function moveLiquidPill(activeLinkEl) {
+    const liquidPill = document.getElementById('nav-liquid-pill');
+    const navContainer = document.querySelector('.liquid-nav');
+    
+    if (!liquidPill || !navContainer) return;
+
+    if (activeLinkEl) {
+        const navRect = navContainer.getBoundingClientRect();
+        const linkRect = activeLinkEl.getBoundingClientRect();
+        
+        // Calcula a posição da pílula relativa ao container
+        const pillLeft = linkRect.left - navRect.left;
+        const pillWidth = linkRect.width;
+
+        liquidPill.style.left = `${pillLeft}px`;
+        liquidPill.style.width = `${pillWidth}px`;
+        liquidPill.style.opacity = '1';
+    } else {
+        // Esconde a pílula se nenhuma rota estiver ativa (ex: #/exercise)
+        liquidPill.style.opacity = '0';
+    }
+}
+
 
 // --- RENDERIZAÇÃO DE PÁGINAS ---
 
@@ -344,7 +367,7 @@ function getPageHeader(title) {
             <img src="${avatarUrl}" alt="Avatar" class="w-16 h-16 rounded-full object-cover shadow-lg border-2" style="border-color: var(--primary);">
             <div>
                 <h1 class="font-bold text-3xl md:text-4xl">${title}</h1>
-                <p class="text-lg text-gray-400">Olá, ${userProfile.name.split(' ')[0]}!</p>
+                <p class="text-lg text-secondary">Olá, ${userProfile.name.split(' ')[0]}!</p>
             </div>
         </div>
     `;
@@ -360,7 +383,7 @@ function renderHome() {
             ${getPageHeader('Início')}
             <div class="card p-6 text-center">
                 <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
-                <p class="text-gray-300">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
+                <p class="text-secondary">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>).</p>
             </div>
         `;
         return;
@@ -372,20 +395,20 @@ function renderHome() {
         ${getPageHeader('Início')}
         <div class="card p-6 mb-6">
             <h2 class="text-xl font-bold mb-4">Bem-vindo(a) de volta!</h2>
-            <p class="text-gray-300 mb-6">Continue de onde parou. Seu progresso é salvo automaticamente na nuvem.</p>
-            <button id="go-to-map-btn" class="btn-primary w-full text-lg">
+            <p class="text-secondary mb-6">Continue de onde parou. Seu progresso é salvo automaticamente na nuvem.</p>
+            <button id="go-to-map-btn" class="btn-primary w-full text-lg py-3 rounded-xl font-semibold">
                 Ir para o Mapa de Aulas →
             </button>
         </div>
         
         <div class="card p-6">
             <h2 class="text-xl font-bold mb-4">Seu Progresso</h2>
-            <div class="mb-2 flex justify-between font-medium text-gray-300">
+            <div class="mb-2 flex justify-between font-medium text-secondary">
                 <span>Lições Completas</span>
                 <span>${completedCount} / ${totalLektions}</span>
             </div>
-            <div class="progress-bar mb-4">
-                <div class="progress-fill" style="width: ${progress}%;"></div>
+            <div class="progress-bar h-2.5 rounded-full mb-4">
+                <div class="progress-fill h-2.5 rounded-full" style="width: ${progress}%;"></div>
             </div>
             <div class="text-center text-2xl font-bold" style="color: var(--primary);">${Math.round(progress)}%</div>
         </div>
@@ -397,13 +420,14 @@ function renderHome() {
 function renderMap() {
     const page = document.getElementById('page-map');
     const completed = userProfile.completedLektions || [];
+    const inProgress = userProfile.inProgressLektions || {};
 
     if (allLektions.length === 0) {
         page.innerHTML = `
             ${getPageHeader('Mapa de Aprendizado')}
             <div class="card p-6 text-center">
                 <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
-                <p class="text-gray-300">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
+                <p class="text-secondary">Não foi possível carregar os dados das lições (<code>exercisesData.js</code>).</p>
             </div>
         `;
         return;
@@ -414,36 +438,38 @@ function renderMap() {
         <div class="space-y-4">
             ${allLektions.map((lektion, index) => {
                 const isCompleted = completed.includes(lektion.id);
-                // A primeira lição está sempre desbloqueada.
-                // As seguintes são desbloqueadas se a anterior foi completada.
+                const isInProgress = Object.keys(inProgress).includes(String(lektion.id));
                 const isLocked = index > 0 && !completed.includes(allLektions[index - 1].id);
+                
+                let icon = index + 1;
+                if (isLocked) icon = '<i data-lucide="lock" class="w-6 h-6"></i>';
+                else if (isCompleted) icon = '<i data-lucide="check" class="w-6 h-6"></i>';
+                else if (isInProgress) icon = '<i data-lucide="play" class="w-6 h-6 fill-current"></i>';
                 
                 return `
                     <div 
                         id="lektion-${lektion.id}"
-                        class="card p-5 flex items-center gap-4 lektion-card ${isLocked ? 'locked' : 'cursor-pointer hover:bg-gray-800'}"
+                        class="card p-5 flex items-center gap-4 lektion-card ${isLocked ? 'locked' : 'cursor-pointer transition-transform transform hover:-translate-y-1'}"
                         data-lektion-id="${lektion.id}"
                     >
-                        <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl" style="background-color: ${isLocked ? 'var(--border)' : 'var(--primary)'}; color: ${isLocked ? 'var(--text-opacity-50)' : 'white'};">
-                            ${isLocked ? '<i data-lucide="lock" class="w-6 h-6"></i>' : (isCompleted ? '<i data-lucide="check" class="w-6 h-6"></i>' : index + 1)}
+                        <div class="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl" style="background-color: ${isLocked ? 'var(--border)' : (isCompleted ? '#28a745' : 'var(--primary)')}; color: white;">
+                            ${icon}
                         </div>
                         <div class="flex-grow">
                             <h3 class="text-lg font-bold">${lektion.title}</h3>
-                            <p class="text-sm text-gray-400">${lektion.topics.join(', ')}</p>
+                            <p class="text-sm text-secondary">${lektion.topics.join(', ')}</p>
                         </div>
-                        ${!isLocked ? '<i data-lucide="chevron-right" class="w-6 h-6 text-gray-500"></i>' : ''}
+                        ${!isLocked ? '<i data-lucide="chevron-right" class="w-6 h-6 text-secondary"></i>' : ''}
                     </div>
                 `;
             }).join('')}
         </div>
     `;
 
-    // Adiciona event listeners para os cards de lição
     document.querySelectorAll('.lektion-card:not(.locked)').forEach(card => {
         card.onclick = () => {
-            const lektionId = card.dataset.lektionId;
-            // MUDADO: Chama a função startLektion em vez de mudar o hash
-            startLektion(parseInt(lektionId));
+            const lektionId = parseInt(card.dataset.lektionId);
+            startLektion(lektionId);
         };
     });
     
@@ -460,14 +486,14 @@ function renderProgress() {
         ${getPageHeader('Progresso')}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="card p-6 text-center">
-                <h2 class="text-lg font-medium text-gray-400 mb-2">Pontos Totais</h2>
+                <h2 class="text-lg font-medium text-secondary mb-2">Pontos Totais</h2>
                 <div class="text-5xl font-bold" style="color: var(--primary);">${score}</div>
-                <i data-lucide="award" class="w-12 h-12 mx-auto mt-4 text-gray-500"></i>
+                <i data-lucide="award" class="w-12 h-12 mx-auto mt-4 text-secondary"></i>
             </div>
             <div class="card p-6 text-center">
-                <h2 class="text-lg font-medium text-gray-400 mb-2">Lições Completas</h2>
+                <h2 class="text-lg font-medium text-secondary mb-2">Lições Completas</h2>
                 <div class="text-5xl font-bold" style="color: var(--accent);">${completedCount} / ${totalLektions || 'N/A'}</div>
-                <i data-lucide="check-circle" class="w-12 h-12 mx-auto mt-4 text-gray-500"></i>
+                <i data-lucide="check-circle" class="w-12 h-12 mx-auto mt-4 text-secondary"></i>
             </div>
             <div class="card p-6 md:col-span-2">
                 <h2 class="text-xl font-bold mb-4">Lições Completadas</h2>
@@ -475,11 +501,11 @@ function renderProgress() {
                     <ul class="space-y-3">
                         ${userProfile.completedLektions.map(id => {
                             const lektion = allLektions.find(l => l.id === id);
-                            return lektion ? `<li class="flex items-center gap-3 text-gray-300"><i data-lucide="check" class="w-5 h-5 text-green-500"></i> ${lektion.title}</li>` : '';
+                            return lektion ? `<li class="flex items-center gap-3"><i data-lucide="check" class="w-5 h-5 text-green-500"></i> ${lektion.title}</li>` : '';
                         }).join('')}
                     </ul>
                 ` : `
-                    <p class="text-gray-400 text-center py-4">Você ainda não completou nenhuma lição. Vá para o Mapa para começar!</p>
+                    <p class="text-secondary text-center py-4">Você ainda não completou nenhuma lição.</p>
                 `}
             </div>
         </div>
@@ -496,7 +522,7 @@ function renderSettings() {
             ${getPageHeader('Configurações')}
             <div class="card p-6 text-center">
                 <h2 class="text-xl font-bold mb-4 text-red-500">Erro de Carregamento</h2>
-                <p class="text-gray-300">Não foi possível carregar os dados dos temas (<code>themes.js</code>). Verifique se o arquivo está no lugar correto e recarregue a página.</p>
+                <p class="text-secondary">Não foi possível carregar os dados dos temas (<code>themes.js</code>).</p>
             </div>
         `;
         return;
@@ -509,15 +535,16 @@ function renderSettings() {
         
         <div class="card p-6 mb-6">
             <h2 class="text-xl font-bold mb-4">Tema do Aplicativo</h2>
+            <p class="text-secondary mb-6">Escolha seu tema favorito. A mudança é salva automaticamente.</p>
             <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 ${Object.keys(allThemes).map(themeName => {
                     const theme = allThemes[themeName];
                     const isSelected = themeName === currentThemeName;
                     return `
                         <button 
-                            class="theme-option p-4 rounded-lg border-2"
+                            class="theme-option p-4 rounded-lg border-2 text-center"
                             data-theme="${themeName}"
-                            style="border-color: ${isSelected ? theme.primary : 'var(--border)'}; background-color: ${theme.bg};"
+                            style="border-color: ${isSelected ? theme.primary : 'var(--border)'}; background: ${theme.bg};"
                         >
                             <span class="font-medium" style="color: ${theme.text};">${theme.name}</span>
                         </button>
@@ -528,18 +555,17 @@ function renderSettings() {
 
         <div class="card p-6">
             <h2 class="text-xl font-bold mb-4">Conta</h2>
-            <p class="text-gray-300 mb-4">Você está logado como ${userProfile.name} (${userProfile.email || 'sem e-mail'}).</p>
-            <button id="logout-btn" class="btn-secondary w-full" style="border-color: #ef4444; color: #ef4444;">
+            <p class="text-secondary mb-4">Você está logado como ${userProfile.name} (${userProfile.email || 'sem e-mail'}).</p>
+            <button id="logout-btn" class="btn-secondary w-full py-3 rounded-xl font-semibold" style="border-color: #ef4444; color: #ef4444;">
                 Sair (Logout)
             </button>
         </div>
     `;
 
-    // Adiciona listeners
     document.querySelectorAll('.theme-option').forEach(btn => {
         btn.onclick = () => {
             const themeName = btn.dataset.theme;
-            applyTheme(themeName, true); // Salva no DB
+            applyTheme(themeName, true);
             renderSettings(); // Re-renderiza para mostrar a seleção
         };
     });
@@ -557,74 +583,95 @@ function renderSettings() {
     };
 }
 
-// --- LÓGICA DE LIÇÃO E EXERCÍCIOS (AGORA EM PÁGINA CHEIA) ---
+// --- LÓGICA DE LIÇÃO E EXERCÍCIOS ---
 
 /**
- * Inicia uma lição. Chamado pelo clique no mapa.
- * Prepara o estado e navega para a página de exercício.
+ * Converte o texto simples (quase-markdown) das explicações em HTML.
  */
-function startLektion(lektionId) {
+function parseSimpleMarkdown(text = '') {
+    return text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Negrito
+        .replace(/• (.*?)(\n|$)/g, '<ul><li>$1</li></ul>') // Listas
+        .replace(/<\/ul><ul>/g, '') // Junta listas
+        .replace(/\n/g, '<br>'); // Quebra de linha
+}
+
+/**
+ * Inicia uma lição.
+ */
+async function startLektion(lektionId) {
     const lektion = allLektions.find(l => l.id === lektionId);
     if (!lektion) {
         console.error("Lição não encontrada:", lektionId);
         return;
     }
 
-    // Reseta o estado da lição
     currentLektion = lektion;
-    currentExerciseIndex = 0;
+    
+    // ATUALIZAÇÃO: Verifica se há progresso salvo
+    // Temos que ler UMA VEZ do banco de dados, pois o userProfile pode estar
+    // um pouco desatualizado se o usuário fechou o app rápido.
+    const profileDocRef = doc(db, "users", userId, "profile", "data");
+    const docSnap = await getDoc(profileDocRef);
+    const profileData = docSnap.data() || {};
+    userProfile.inProgressLektions = profileData.inProgressLektions || {};
+    
+    const savedProgress = userProfile.inProgressLektions?.[lektionId];
+    if (savedProgress && savedProgress < lektion.exercises.length) {
+        currentExerciseIndex = savedProgress;
+        console.log(`Continuando lição ${lektionId} do exercício ${savedProgress}`);
+    } else {
+        currentExerciseIndex = 0;
+    }
+    
     userAnswer = '';
     feedback = null;
-
-    // Navega para a página de exercício
     window.location.hash = '#/exercise';
 }
 
 /**
- * Renderiza a PÁGINA de exercício (substitui renderLektionInModal)
+ * Renderiza a PÁGINA de exercício
  */
 function renderExercisePage() {
     const page = document.getElementById('page-exercise');
 
     if (!currentLektion) {
         page.innerHTML = `
-            <h2 class="text-2xl font-bold mb-4 text-red-500">Erro</h2>
-            <p class="text-gray-300 mb-6">Nenhuma lição está selecionada.</p>
-            <button id="back-to-map" class="btn-primary">Voltar ao Mapa</button>
+            <div class="card p-6 text-center">
+                <h2 class="text-2xl font-bold mb-4 text-red-500">Erro</h2>
+                <p class="text-secondary mb-6">Nenhuma lição está selecionada.</p>
+                <button id="back-to-map" class="btn-primary py-3 px-6 rounded-xl">Voltar ao Mapa</button>
+            </div>
         `;
         document.getElementById('back-to-map').onclick = () => window.location.hash = '#/map';
         return;
     }
     
-    // O conteúdo agora é uma página inteira
     page.innerHTML = `
-        <div class="exercise-page-header">
-            <button id="back-to-map-btn" class="btn-secondary" style="padding: 0.5rem 0.75rem;">
-                <i data-lucide="arrow-left" class="w-6 h-6"></i>
+        <div class="flex items-center justify-between gap-4 mb-6">
+            <button id="back-to-map-btn" class="btn-secondary !border-0 !bg-gray-700/50 hover:!bg-gray-600/50" style="padding: 0.75rem;">
+                <i data-lucide="x" class="w-6 h-6"></i>
             </button>
-            <div>
-                <h1 class="text-2xl md:text-3xl font-bold" style="color: var(--primary);">${currentLektion.title}</h1>
-                <p class="text-gray-400">Exercício ${currentExerciseIndex + 1} de ${currentLektion.exercises.length}</p>
+            <div class="flex-grow text-right">
+                <h1 class="text-2xl font-bold" style="color: var(--primary);">${currentLektion.title}</h1>
+                <p class="text-secondary">Exercício ${currentExerciseIndex + 1} de ${currentLektion.exercises.length}</p>
             </div>
         </div>
         <div id="exercise-container-page"></div>
     `;
     
     document.getElementById('back-to-map-btn').onclick = () => {
-        // Confirmação para sair
-        // REMOVIDO: O confirm() não funciona bem no ambiente de iframe.
-        // if (confirm("Você tem certeza que quer sair? Seu progresso neste exercício não será salvo.")) {
-            currentLektion = null; // Limpa a lição atual
-            window.location.hash = '#/map';
-        // }
+        // Simplesmente volta ao mapa. O progresso já está salvo.
+        currentLektion = null; // Limpa a lição atual
+        window.location.hash = '#/map';
     };
     
     safeCreateIcons();
-    renderCurrentExerciseOnPage(); // Renderiza o exercício atual dentro da página
+    renderCurrentExerciseOnPage();
 }
 
 /**
- * Renderiza o exercício ATUAL dentro da página de exercício
+ * Renderiza o exercício ATUAL dentro da página
  */
 function renderCurrentExerciseOnPage() {
     const container = document.getElementById('exercise-container-page');
@@ -639,10 +686,11 @@ function renderCurrentExerciseOnPage() {
             <input 
                 type="text"
                 id="exercise-input"
-                class="input-field"
+                class="input-field w-full text-lg p-4 rounded-xl"
                 placeholder="Digite sua resposta..."
                 value="${userAnswer}"
                 ${feedback ? 'disabled' : ''}
+                autocomplete="off"
             >
         `;
     } else if (exercise.type === 'multipleChoice') {
@@ -650,7 +698,7 @@ function renderCurrentExerciseOnPage() {
             <div class="flex flex-col gap-3">
                 ${exercise.options.map(option => `
                     <button 
-                        class="btn-secondary text-left p-4 text-base w-full ${userAnswer === option ? '!bg-var(--primary) !text-white' : ''}"
+                        class="btn-secondary text-left p-4 text-base w-full rounded-xl"
                         data-option="${option}"
                         ${feedback ? 'disabled' : ''}
                         style="${userAnswer === option ? `background-color: var(--primary); color: white; border-color: var(--primary);` : ''}"
@@ -663,53 +711,47 @@ function renderCurrentExerciseOnPage() {
     }
 
     container.innerHTML = `
-        <!-- Progresso -->
         <div class="card p-4 mb-6">
-            <div class="progress-bar" style="margin: 0;">
-                <div class="progress-fill" style="width: ${progress}%;"></div>
+            <div class="progress-bar h-2.5 rounded-full" style="margin: 0;">
+                <div class="progress-fill h-2.5 rounded-full" style="width: ${progress}%;"></div>
             </div>
         </div>
 
-        <!-- Pergunta e Resposta -->
         <div class="card p-6">
-            <!-- Pergunta -->
             <h3 class="text-xl font-medium mb-6">${exercise.question.replace(/___/g, '<span class="font-bold text-gray-400">___</span>')}</h3>
             
-            <!-- Input -->
             <div class="mb-4">${inputHtml}</div>
             
-            <!-- Feedback -->
             <div id="feedback-container">
                 ${feedback ? `
                     <div class="feedback ${feedback.isCorrect ? 'correct' : 'incorrect'}">
                         <i data-lucide="${feedback.isCorrect ? 'check-circle' : 'x-circle'}" class="w-8 h-8 flex-shrink-0"></i>
                         <div>
                             <strong class="block mb-1">${feedback.isCorrect ? 'Correto!' : 'Incorreto'}</strong>
-                            ${feedback.explanation}
+                            <span class="text-secondary">${feedback.explanation}</span>
                         </div>
                     </div>
                 ` : ''}
             </div>
             
-            <!-- Botões de Ação -->
             <div class="flex gap-4 mt-8 pt-6 border-t" style="border-color: var(--border);">
-                <button id="grammar-btn" class="btn-secondary">
-                    <i data-lucide="book-open" class="w-5 h-5 mr-2"></i> Gramática
+                <button id="grammar-btn" class="btn-secondary !px-4 !py-3 rounded-xl">
+                    <i data-lucide="book-open" class="w-5 h-5"></i>
                 </button>
-                <button id="action-btn" class="btn-primary flex-grow" ${(!userAnswer && !feedback) ? 'disabled' : ''}>
+                <button id="action-btn" class="btn-primary flex-grow !py-3 rounded-xl font-semibold" ${(!userAnswer && !feedback) ? 'disabled' : ''}>
                     ${feedback ? 'Próximo →' : 'Verificar'}
                 </button>
             </div>
         </div>
     `;
 
-    // Adiciona Listeners
+    // Listeners
     if (exercise.type === 'fillBlank' || exercise.type === 'translation') {
         const input = document.getElementById('exercise-input');
         const actionBtn = document.getElementById('action-btn');
         input.oninput = (e) => {
             userAnswer = e.target.value;
-            if (!feedback) actionBtn.disabled = !userAnswer; // Ativa/desativa o botão
+            if (!feedback) actionBtn.disabled = !userAnswer;
         };
         input.onkeydown = (e) => {
             if (e.key === 'Enter' && !feedback && userAnswer) document.getElementById('action-btn').click();
@@ -725,14 +767,14 @@ function renderCurrentExerciseOnPage() {
         });
     }
     
-    document.getElementById('grammar-btn').onclick = showGrammarModal; // Continua abrindo gramática no modal
+    document.getElementById('grammar-btn').onclick = showGrammarModal;
     document.getElementById('action-btn').onclick = feedback ? nextExercise : checkAnswer;
     
     safeCreateIcons();
 }
 
 /**
- * Abre o modal de gramática (sem alterações)
+ * Abre o modal de gramática
  */
 function showGrammarModal() {
     if (!currentLektion) return;
@@ -744,29 +786,22 @@ function showGrammarModal() {
 
     const grammarHtml = currentLektion.grammarKeys.map(key => {
         const explanation = allGrammar[key];
-        if (!explanation) {
-            return `<p class="text-red-500">Erro: Tópico de gramática "${key}" não encontrado.</p>`;
-        }
-        
-        // *** LINHA MODIFICADA ***
-        // Usa a nova função para "traduzir" o Markdown
-        const parsedContent = parseSimpleMarkdown(explanation.content);
-
-        return `
-            <div class="mb-6">
-                <h3 class="text-xl font-bold mb-3" style="color: var(--accent);">${explanation.title}</h3>
-                <div class="text-gray-300 whitespace-pre-line leading-relaxed break-words">
-                    ${parsedContent}
+        return explanation ? `
+            <div classmb-6>
+                <h3 class="text-xl font-bold mb-3" style="color: var(--primary);">${explanation.title}</h3>
+                <div class="text-gray-700 whitespace-pre-line leading-relaxed break-words">
+                    ${parseSimpleMarkdown(explanation.content)}
                 </div>
             </div>
-        `;
-    }).join('');
+        ` : `<p class="text-red-500">Erro: Tópico de gramática "${key}" não encontrado.</p>`;
+    }).join('<hr class="my-6">');
     
-    showModal("Explicações Gramaticais 📚", grammarHtml, '900px');
+    // ATUALIZAÇÃO: O título agora é fixo no CSS, passamos só o conteúdo
+    showModal("Explicações Gramaticais 📚", grammarHtml);
 }
 
 /**
- * Verifica a resposta (sem alterações, mas agora re-renderiza a PÁGINA)
+ * Verifica a resposta
  */
 function checkAnswer() {
     if (!userAnswer) return;
@@ -776,12 +811,11 @@ function checkAnswer() {
     const correctAns = exercise.answer.toLowerCase();
     const alternatives = exercise.alternatives?.map(a => a.toLowerCase()) || [];
 
-    // Lógica de checagem (igual ao React app)
     const correctAnswers = [correctAns, ...alternatives];
     const isCorrect = correctAnswers.some(ans => {
         if (ans.includes('|')) {
             const parts = ans.split('|');
-            const userParts = userAns.split(/[\s,|]+/); // Aceita espaço, vírgula ou | como separador
+            const userParts = userAns.split(/[\s,|]+/);
             return parts.every((part, idx) => userParts[idx] === part);
         }
         return userAns === ans;
@@ -795,50 +829,68 @@ function checkAnswer() {
     if (isCorrect) {
         // Adiciona pontos
         const newScore = (userProfile.score || 0) + 10;
-        userProfile.score = newScore; // Atualiza localmente
-        saveProfileData({ score: newScore }, false); // Salva no FB sem loading
+        userProfile.score = newScore;
+        
+        // ATUALIZAÇÃO: Salva o progresso parcial da lição
+        const nextIndex = currentExerciseIndex + 1;
+        const currentLektionId = currentLektion.id;
+        
+        if (!userProfile.inProgressLektions) {
+            userProfile.inProgressLektions = {};
+        }
+        userProfile.inProgressLektions[currentLektionId] = nextIndex;
+
+        saveProfileData({ 
+            score: newScore,
+            inProgressLektions: userProfile.inProgressLektions
+        }, false);
     }
     
-    renderCurrentExerciseOnPage(); // MUDADO: Renderiza na página
+    renderCurrentExerciseOnPage();
 }
 
 /**
- * Avança para o próximo exercício (sem alterações)
+ * Avança para o próximo exercício
  */
 async function nextExercise() {
     if (currentExerciseIndex < currentLektion.exercises.length - 1) {
-        // Próximo exercício
         currentExerciseIndex++;
         userAnswer = '';
         feedback = null;
-        renderCurrentExerciseOnPage(); // MUDADO: Renderiza na página
+        renderCurrentExerciseOnPage();
     } else {
-        // Finalizou a lição
         await finishLektion();
     }
 }
 
 /**
- * Finaliza a lição (agora navega para o mapa)
+ * Finaliza a lição
  */
 async function finishLektion() {
-    showLoading("Salvando progresso..."); // USA O MODAL para loading
+    showLoading("Salvando progresso...");
     
     const completed = userProfile.completedLektions || [];
     if (!completed.includes(currentLektion.id)) {
         completed.push(currentLektion.id);
-        userProfile.completedLektions = completed; // Atualiza local
-        await saveProfileData({ completedLektions: completed }, false); // Salva no FB
+        userProfile.completedLektions = completed;
     }
     
-    hideModal(); // Fecha o modal de "Salvando..."
-    currentLektion = null; // Limpa a lição
-    window.location.hash = '#/map'; // Volta para o mapa
-    // O router vai rodar e re-renderizar o mapa com a lição completa
+    // ATUALIZAÇÃO: Remove o progresso "em andamento"
+    if (userProfile.inProgressLektions) {
+        delete userProfile.inProgressLektions[currentLektion.id];
+    }
+
+    await saveProfileData({ 
+        completedLektions: userProfile.completedLektions,
+        inProgressLektions: userProfile.inProgressLektions
+    }, false);
+    
+    hideModal();
+    currentLektion = null;
+    window.location.hash = '#/map';
 }
 
 // --- INICIALIZAÇÃO DO APP ---
-// Executa o initFirebase assim que o script for lido,
-// como ele está no fim do <body>, o DOM estará pronto.
 initFirebase();
+
 
