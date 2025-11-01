@@ -151,129 +151,17 @@
     </div>
 
     <!-- === MUDANÇA CRÍTICA DE SDK (COMO O BOOKTRACKER) === -->
-    <!-- Removemos as bibliotecas antigas 'compat.js' -->
-    <!-- Carregamos as novas bibliotecas modulares v11+ -->
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
-    <!-- === FIM DA MUDANÇA === -->
-
-
-    <!-- Themes -->
+    
+    <!-- 1. Carregamos os temas (necessário pois 'themes.js' não é um módulo) -->
     <script src="themes.js"></script>
 
-    <script>
-        // Firebase Configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaBiatLUcXU",
-            authDomain: "deutsch-39779.firebaseapp.com",
-            projectId: "deutsch-39779",
-            storageBucket: "deutsch-39779.firebasestorage.app",
-            messagingSenderId: "672743327567",
-            appId: "1:672743327567:web:8875f89b1f282b7aba273a",
-            measurementId: "G-XYVLCZD740"
-        };
-
-        // --- LÓGICA DE LOGIN ATUALIZADA PARA O SDK v9+ (MODULAR) ---
-        
-        // 1. Inicializa o Firebase
-        const app = firebase.app.initializeApp(firebaseConfig);
-        
-        // 2. Obtém os serviços usando a sintaxe v9 (do objeto global)
-        const auth = firebase.auth.getAuth(app);
-        const db = firebase.firestore.getFirestore(app);
-        
-        // 3. Destrutura as funções necessárias (como no booktracker)
-        const { GoogleAuthProvider, signInWithPopup, onAuthStateChanged } = firebase.auth;
-        const { doc, getDoc, setDoc, updateDoc, serverTimestamp } = firebase.firestore;
-
-
-        // Selected theme
-        let selectedTheme = 'taylorSwift';
-
-        // Render theme grid
-        function renderThemes() {
-            const grid = document.getElementById('themeGrid');
-            Object.keys(window.themes).forEach(themeName => {
-                const theme = window.themes[themeName];
-                const div = document.createElement('div');
-                div.className = 'theme-option';
-                if (themeName === selectedTheme) {
-                    div.classList.add('selected');
-                }
-                div.textContent = theme.name;
-                div.style.backgroundColor = theme.primary;
-                div.style.color = theme.text;
-                div.style.borderColor = theme.primary;
-                
-                div.onclick = () => {
-                    selectedTheme = themeName;
-                    document.querySelectorAll('.theme-option').forEach(el => {
-                        el.classList.remove('selected');
-                    });
-                    div.classList.add('selected');
-                };
-                
-                grid.appendChild(div);
-            });
-        }
-
-        // Google Sign In (Atualizado para v9)
-        document.getElementById('loginBtn').addEventListener('click', async () => {
-            const loading = document.getElementById('loading');
-            loading.style.display = 'block';
-            
-            try {
-                const provider = new GoogleAuthProvider();
-                const result = await signInWithPopup(auth, provider);
-                const user = result.user;
-
-                // Lógica de verificação (a mesma que corrigimos antes, agora com v9)
-                const docRef = doc(db, 'users', user.uid);
-                const docSnap = await getDoc(docRef);
-
-                if (!docSnap.exists()) {
-                    // 1. NOVO USUÁRIO: Cria o documento com os dados padrão
-                    await setDoc(docRef, {
-                        email: user.email,
-                        displayName: user.displayName,
-                        theme: selectedTheme, // Salva o tema escolhido
-                        lastLogin: serverTimestamp(),
-                        score: 0,
-                        completedLektions: [],
-                        lektionProgress: {},
-                        exerciseStats: {}
-                    });
-                } else {
-                    // 2. USUÁRIO EXISTENTE: Apenas atualiza o 'lastLogin'
-                    await updateDoc(docRef, {
-                        lastLogin: serverTimestamp()
-                    });
-                }
-                // --- FIM DA CORREÇÃO ---
-
-                // Save theme to localStorage for quick access
-                localStorage.setItem('selectedTheme', selectedTheme);
-
-                // Redirect to app
-                window.location.href = 'app.html';
-            } catch (error) {
-                console.error('Login error:', error);
-                alert('Erro ao fazer login. Tente novamente.');
-                loading.style.display = 'none';
-            }
-        });
-
-        // Check if user is already logged in (Atualizado para v9)
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                window.location.href = 'app.html';
-            }
-        });
-
-        // Initialize
-        renderThemes();
-    </script>
+    <!-- 2. Carregamos o NOVO auth.js como um MÓDULO, igual ao booktracker -->
+    <!-- Ele agora importará o Firebase sozinho -->
+    <script type="module" src="auth.js"></script>
+    
+    <!-- 3. Removemos os scripts antigos do SDK e o script inline -->
+    <!-- === FIM DA MUDANÇA === -->
+    
 </body>
 </html>
 
