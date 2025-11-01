@@ -1,11 +1,11 @@
-// themes.js - Definições dos 14 temas (COM AJUSTES DE CONTRASTE)
+// themes.js - Definições dos 14 temas (ATUALIZADO com gradientes)
 
 window.themes = {
     light: {
         name: 'Light',
         primary: '#667eea',
-        bg: '#ffffff',
-        text: '#2d3748', // Texto mais escuro para melhor leitura
+        bg: 'linear-gradient(135deg, #ffffff, #f8f9fa)', // Gradiente
+        text: '#2d3748',
         card: '#f8f9fa',
         accent: '#764ba2',
         border: '#e0e0e0'
@@ -14,8 +14,8 @@ window.themes = {
     dark: {
         name: 'Dark',
         primary: '#bb86fc',
-        bg: '#121212',
-        text: '#f7fafc', // Texto mais claro
+        bg: 'linear-gradient(135deg, #121212, #1a1a1a)', // Gradiente
+        text: '#f7fafc',
         card: '#1e1e1e',
         accent: '#03dac6',
         border: '#333333'
@@ -23,9 +23,9 @@ window.themes = {
     
     taylorSwift: {
         name: 'Taylor Swift',
-        primary: '#a58a2a', // Escurecido para contraste
-        bg: '#faf8f3',
-        text: '#2a2a2a', // Texto bem escuro
+        primary: '#a58a2a',
+        bg: 'linear-gradient(135deg, #faf8f3, #f5f0e8)', // Gradiente
+        text: '#2a2a2a',
         card: '#f5f0e8',
         accent: '#c9a961',
         border: '#e8dcc8'
@@ -33,8 +33,8 @@ window.themes = {
     
     fearless: {
         name: 'Fearless',
-        primary: '#b89b2e', // Escurecido para contraste
-        bg: '#fffef9',
+        primary: '#b89b2e',
+        bg: 'linear-gradient(135deg, #fffef9, #faf5e4)', // Gradiente
         text: '#3d3019',
         card: '#faf5e4',
         accent: '#ffd700',
@@ -43,8 +43,8 @@ window.themes = {
     
     speakNow: {
         name: 'Speak Now',
-        primary: '#8e44ad', // 'accent' virou 'primary'
-        bg: '#f9f5ff',
+        primary: '#8e44ad',
+        bg: 'linear-gradient(135deg, #f9f5ff, #f0e6ff)', // Gradiente
         text: '#2d2033',
         card: '#f0e6ff',
         accent: '#9b59b6',
@@ -54,7 +54,7 @@ window.themes = {
     red: {
         name: 'Red',
         primary: '#c0392b',
-        bg: '#fff5f5',
+        bg: 'linear-gradient(135deg, #fff5f5, #ffe6e6)', // Gradiente
         text: '#2d1a1a',
         card: '#ffe6e6',
         accent: '#e74c3c',
@@ -64,28 +64,27 @@ window.themes = {
     nineteen89: {
         name: '1989',
         primary: '#3498db',
-        bg: '#f0f8ff',
+        bg: 'linear-gradient(135deg, #f0f8ff, #e3f2fd)', // Gradiente
         text: '#1a2d3d',
         card: '#e3f2fd',
         accent: '#5dade2',
         border: '#b3d9f2'
     },
     
-    // ATUALIZADO: Fundo preto
     reputation: {
         name: 'Reputation',
-        primary: '#cccccc', // Cinza claro para contraste
-        bg: '#111111', // Preto
-        text: '#f5f5f5', // Texto branco
-        card: '#1e1e1e', // Card escuro
-        accent: '#95a5a6', // Cinza médio
+        primary: '#cccccc',
+        bg: 'linear-gradient(135deg, #111111, #1e1e1e)', // Gradiente
+        text: '#f5f5f5',
+        card: '#1e1e1e',
+        accent: '#95a5a6',
         border: '#333333'
     },
     
     lover: {
         name: 'Lover',
         primary: '#ff69b4',
-        bg: '#fff0f8',
+        bg: 'linear-gradient(135deg, #fff0f8, #ffe6f5)', // Gradiente
         text: '#3d1a2d',
         card: '#ffe6f5',
         accent: '#ff1493',
@@ -94,8 +93,8 @@ window.themes = {
     
     folklore: {
         name: 'Folklore',
-        primary: '#808f8f', // Um pouco mais escuro
-        bg: '#f5f5f5',
+        primary: '#808f8f',
+        bg: 'linear-gradient(135deg, #f5f5f5, #ecf0f1)', // Gradiente
         text: '#2c3e50',
         card: '#ecf0f1',
         accent: '#95a5a6',
@@ -105,18 +104,17 @@ window.themes = {
     evermore: {
         name: 'Evermore',
         primary: '#8b4513',
-        bg: '#faf5f0',
+        bg: 'linear-gradient(135deg, #faf5f0, #f0e6d8)', // Gradiente
         text: '#2d1a0f',
         card: '#f0e6d8',
         accent: '#a0522d',
         border: '#d4c4b0'
     },
     
-    // O seu favorito, mantido como está
     midnights: {
         name: 'Midnights',
         primary: '#191970',
-        bg: '#0f0f1e',
+        bg: 'linear-gradient(135deg, #0f0f1e, #1a1a3e)', // Gradiente
         text: '#e8e8ff',
         card: '#1a1a3e',
         accent: '#4169e1',
@@ -126,21 +124,20 @@ window.themes = {
     ttpd: {
         name: 'TTPD',
         primary: '#708090',
-        bg: '#f8f8fa',
+        bg: 'linear-gradient(135deg, #f8f8fa, #e8e8ed)', // Gradiente
         text: '#2d2d33',
         card: '#e8e8ed',
         accent: '#778899',
         border: '#c0c0cc'
     },
     
-    // ATUALIZADO: Cores mais coesas
     showgirl: {
         name: 'TLOAS',
-        primary: '#f5a623', // Laranja dourado
-        bg: '#fef9f3', // Fundo creme
-        text: '#3a2e1f', // Texto marrom escuro
-        card: '#fff5e8', // Card creme claro
-        accent: '#f7c35f', // Laranja mais claro
+        primary: '#f5a623',
+        bg: 'linear-gradient(135deg, #fef9f3, #fff5e8)', // Gradiente
+        text: '#3a2e1f',
+        card: '#fff5e8',
+        accent: '#f7c35f',
         border: '#f8e6ce'
     }
 };
