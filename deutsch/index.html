@@ -161,7 +161,7 @@
     <script>
         // Firebase Configuration
         const firebaseConfig = {
-            apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaB9iatLUcXU",
+            apiKey: "AIzaSyCyfUhhftcrV1piHd8f-4wYaBiatLUcXU",
             authDomain: "deutsch-39779.firebaseapp.com",
             projectId: "deutsch-39779",
             storageBucket: "deutsch-39779.firebasestorage.app",
@@ -215,34 +215,33 @@
                 const result = await auth.signInWithPopup(provider);
                 const user = result.user;
 
-                // *** INÍCIO DA CORREÇÃO ***
-                // 1. Referencia o documento do usuário
+                // --- CORREÇÃO CRÍTICA DE SINCRONIZAÇÃO ---
+                // Verificamos se o usuário JÁ EXISTE antes de escrever
                 const docRef = db.collection('users').doc(user.uid);
-                
-                // 2. Verifica se o documento já existe
                 const doc = await docRef.get();
 
                 if (!doc.exists) {
-                    // 3. SE NÃO EXISTIR (Novo Usuário): Cria o documento com os padrões
+                    // 1. NOVO USUÁRIO: Cria o documento com os dados padrão
                     await docRef.set({
                         email: user.email,
                         displayName: user.displayName,
-                        theme: selectedTheme, // Usa o tema selecionado nesta página
-                        lektionProgress: {},
+                        theme: selectedTheme, // Salva o tema escolhido
+                        lastLogin: firebase.firestore.FieldValue.serverTimestamp(),
                         score: 0,
                         completedLektions: [],
-                        lastLogin: firebase.firestore.FieldValue.serverTimestamp()
+                        lektionProgress: {},
+                        exerciseStats: {}
                     });
                 } else {
-                    // 4. SE EXISTIR (Usuário Existente): Atualiza *apenas* o último login
-                    //    Isso *impede* que o progresso e o tema sejam sobrescritos.
+                    // 2. USUÁRIO EXISTENTE: Apenas atualiza o 'lastLogin'
+                    // NÃO TOQUE no tema ou progresso, deixe o app.js cuidar disso.
                     await docRef.update({
                         lastLogin: firebase.firestore.FieldValue.serverTimestamp()
                     });
                 }
-                // *** FIM DA CORREÇÃO ***
+                // --- FIM DA CORREÇÃO ---
 
-                // Save theme to localStorage for quick access (isso é local, não afeta o DB)
+                // Save theme to localStorage for quick access
                 localStorage.setItem('selectedTheme', selectedTheme);
 
                 // Redirect to app
