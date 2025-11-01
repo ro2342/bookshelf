@@ -47,12 +47,12 @@ const App = () => {
         return () => unsubscribe();
     }, []);
 
-    // Initialize Lucide icons
+    // Initialize Lucide icons only once
     React.useEffect(() => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    });
+    }, [currentView]); // Only re-run when view changes
 
     // Load user data from Firestore
     const loadUserData = async (uid) => {
@@ -470,10 +470,19 @@ const App = () => {
 
     // EXERCISE VIEW
     function ExerciseView() {
+        const inputRef = React.useRef(null);
+        
         if (!currentLektion) return null;
 
         const exercise = currentLektion.exercises[currentExerciseIndex];
         const progress = ((currentExerciseIndex + 1) / currentLektion.exercises.length) * 100;
+
+        // Auto-focus input when exercise changes
+        React.useEffect(() => {
+            if (inputRef.current && !feedback) {
+                inputRef.current.focus();
+            }
+        }, [currentExerciseIndex]);
 
         return (
             <div>
@@ -513,6 +522,7 @@ const App = () => {
 
                     {exercise.type === 'fillBlank' && (
                         <input 
+                            ref={inputRef}
                             type="text"
                             className="input-field"
                             value={userAnswer}
@@ -520,6 +530,8 @@ const App = () => {
                             onKeyPress={(e) => e.key === 'Enter' && !feedback && checkAnswer()}
                             placeholder="Digite sua resposta..."
                             disabled={!!feedback}
+                            autoComplete="off"
+                            autoFocus
                             style={{
                                 backgroundColor: theme.bg,
                                 color: theme.text,
@@ -555,6 +567,7 @@ const App = () => {
 
                     {exercise.type === 'translation' && (
                         <input 
+                            ref={inputRef}
                             type="text"
                             className="input-field"
                             value={userAnswer}
@@ -562,6 +575,8 @@ const App = () => {
                             onKeyPress={(e) => e.key === 'Enter' && !feedback && checkAnswer()}
                             placeholder="Traduza para alemão..."
                             disabled={!!feedback}
+                            autoComplete="off"
+                            autoFocus
                             style={{
                                 backgroundColor: theme.bg,
                                 color: theme.text,
