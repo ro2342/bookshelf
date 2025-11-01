@@ -1,6 +1,5 @@
 // app.js - Aplicativo React Completo
-// VERSÃO CORRIGIDA: Reverte a lógica dos ícones para a original (estável)
-// e mantém as correções de 'startLektion' e 'saveUserData'.
+// VERSÃO CORRIGIDA E ESTÁVEL
 
 // Firebase Configuration
 const firebaseConfig = {
@@ -49,15 +48,12 @@ const App = () => {
         return () => unsubscribe();
     }, []);
 
-    // *** CORREÇÃO TELA BRANCA ***
-    // Revertido para a lógica original do seu app.
-    // Isso é estável e funcional, e recarrega os ícones
-    // ao mudar de aba (Início, Mapa, Progresso).
+    // Initialize Lucide icons (lógica original estável)
     React.useEffect(() => {
         if (window.lucide) {
             window.lucide.createIcons();
         }
-    }, [currentView]); // <-- Revertido para a dependência original.
+    }, [currentView]); // Só recarrega ao mudar de aba
 
     // Load user data from Firestore
     const loadUserData = async (uid) => {
@@ -68,6 +64,8 @@ const App = () => {
             if (doc.exists) {
                 const data = doc.data();
                 
+                // *** CORREÇÃO LIÇÃO NÃO ABRE ***
+                // Garante que os campos de progresso existam, mesmo em usuários antigos.
                 if (!data.completedLektions) {
                     data.completedLektions = [];
                 }
@@ -75,16 +73,16 @@ const App = () => {
                     data.currentLektionProgress = {};
                 }
                 
-                const userTheme = data.theme || 'taylorSwift';
                 setUserData(data);
-                setCurrentTheme(userTheme);
+                setCurrentTheme(data.theme || 'taylorSwift');
             } else {
                 // Initialize new user data
                 const newUserData = {
                     score: 0,
                     completedLektions: [],
-                    currentLektionProgress: {}, 
+                    currentLektionProgress: {}, // <-- Campo de progresso adicionado
                     theme: 'taylorSwift',
+                    exerciseStats: {}, // <-- Campo original mantido
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 };
                 await docRef.set(newUserData);
@@ -100,13 +98,12 @@ const App = () => {
         if (!user) return;
         
         try {
-            // *** CORREÇÃO SINCRONIZAÇÃO DE TEMA ***
-            // Usa .set({ merge: true }) para garantir que os dados
-            // sejam salvos de forma robusta, assim como na tela de login.
+            // *** CORREÇÃO SINCRONIZAÇÃO DE TEMA E PROGRESSO ***
+            // Usa .set({ merge: true }) para ser mais robusto que .update()
             await db.collection('users').doc(user.uid).set({
                 ...data,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+            }, { merge: true }); // <-- Garante que vai criar ou atualizar, nunca falhar
             
             setUserData(prev => ({ ...prev, ...data }));
         } catch (error) {
@@ -127,15 +124,14 @@ const App = () => {
     // Change theme
     const changeTheme = async (themeName) => {
         setCurrentTheme(themeName);
-        await saveUserData({ theme: themeName });
+        await saveUserData({ theme: themeName }); // Agora usa a função .set() corrigida
         setShowMenu(false);
     };
 
     // Start Lektion
     const startLektion = (lektionId) => {
-        // *** CORREÇÃO LIÇÃO NÃO ABRE ***
-        // Garante que os dados do usuário (userData) existam
-        // antes de tentar abrir a lição.
+        // Guarda de segurança: não faz nada se os dados do usuário
+        // ainda não foram carregados.
         if (!userData) {
             console.warn("User data not loaded yet, please wait.");
             return;
@@ -143,10 +139,12 @@ const App = () => {
 
         const lektion = window.exercisesData.find(l => l.id === lektionId);
         if (lektion) {
+            // Agora isso é seguro, pois 'loadUserData' garantiu que os campos existem
             const isReview = userData.completedLektions.includes(lektionId);
             
             let startIndex = 0;
             if (!isReview) {
+                // Continua de onde parou
                 const savedIndex = userData.currentLektionProgress?.[lektionId];
                 if (savedIndex && savedIndex < lektion.exercises.length) {
                     startIndex = savedIndex;
@@ -154,7 +152,7 @@ const App = () => {
             }
             
             setCurrentLektion(lektion);
-            setCurrentExerciseIndex(startIndex); 
+            setCurrentExerciseIndex(startIndex); // <-- Começa do índice salvo ou de 0
             setUserAnswer('');
             setFeedback(null);
             setCurrentView('exercise');
@@ -170,6 +168,7 @@ const App = () => {
         const correctAns = exercise.answer.toLowerCase();
         const alternatives = exercise.alternatives || [];
         
+        // Handle multi-part answers (e.g., "fährt|ab")
         const correctAnswers = [correctAns, ...alternatives.map(a => a.toLowerCase())];
         const isCorrect = correctAnswers.some(ans => {
             if (ans.includes('|')) {
@@ -186,6 +185,7 @@ const App = () => {
         });
 
         if (isCorrect) {
+            // Add points
             const newScore = (userData?.score || 0) + 10;
             saveUserData({ score: newScore });
         }
@@ -194,8 +194,9 @@ const App = () => {
     // Next exercise
     const nextExercise = async () => {
         const nextIndex = currentExerciseIndex + 1;
-        
+
         if (nextIndex < currentLektion.exercises.length) {
+            // Se a lição NÃO terminou, salva o progresso e avança
             setCurrentExerciseIndex(nextIndex);
             setUserAnswer('');
             setFeedback(null);
@@ -204,6 +205,7 @@ const App = () => {
             await saveUserData({ currentLektionProgress: newProgress });
 
         } else {
+            // Se a lição TERMINOU, chama finishLektion
             await finishLektion();
         }
     };
@@ -217,6 +219,7 @@ const App = () => {
             completedLektions.push(currentLektion.id);
         }
         
+        // Remove dos "em progresso"
         const newProgress = { ...(userData.currentLektionProgress || {}) };
         delete newProgress[currentLektion.id];
         
