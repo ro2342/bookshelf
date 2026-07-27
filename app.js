@@ -247,6 +247,7 @@ function listenToBooks() {
     booksUnsubscribe = onSnapshot(booksCollection, (snapshot) => {
         allBooks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data(), addedAt: doc.data().addedAt?.toDate() || new Date(0) }));
         router();
+        maybeStartExternalSync('books');
     }, (error) => {
         console.error("Erro ao ouvir livros:", error);
         showModal("Erro de Sincronização", `Houve um problema ao sincronizar os seus livros. Erro: ${error.code}`);
@@ -279,6 +280,8 @@ function listenToShelves() {
 }
 
 
+let didInitialExternalSync = false;
+
 function listenToProfile() {
     if (typeof profileUnsubscribe === 'function') profileUnsubscribe();
     if (!userId) return;
@@ -293,7 +296,172 @@ function listenToProfile() {
         }
         if (userProfile.theme) applyTheme(userProfile.theme, false);
         router();
+        maybeStartExternalSync('profile');
     }, (error) => console.error("Erro ao ouvir perfil:", error));
+}
+
+const externalSyncReady = { books: false, profile: false };
+
+// listenToBooks() and listenToProfile() are two independent onSnapshot listeners with
+// no guaranteed ordering - starting the sync from just one of them risks running it
+// before allBooks has loaded, which would make every incoming book look "unmatched"
+// and create duplicates. Wait for both to have fired at least once.
+function maybeStartExternalSync(source) {
+    externalSyncReady[source] = true;
+    if (didInitialExternalSync || !externalSyncReady.books || !externalSyncReady.profile) return;
+    didInitialExternalSync = true;
+    syncExternalSources();
+}
+
+// --- SINCRONIZAÇÃO EXTERNA (Calibre-Web Automated / Audiobookshelf) ---
+// Read-only: nunca escreve nada de volta nesses servidores, só lê e grava no Firestore
+// (a mesma coleção "books" que o resto do app usa - assim tudo aparece junto na mesma
+// lista, sem precisar de um conceito de "card virtual" como o lado do CWA usa).
+
+function normalizeTitle(s) {
+    return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+const STATUS_RANK = { 'quero-ler': 0, 'abandonado': 0, 'lendo': 1, 'lido': 2 };
+
+function betterStatus(currentStatus, incomingStatus) {
+    if (!incomingStatus) return currentStatus;
+    if (!currentStatus) return incomingStatus;
+    return (STATUS_RANK[incomingStatus] || 0) > (STATUS_RANK[currentStatus] || 0) ? incomingStatus : currentStatus;
+}
+
+async function syncExternalSources() {
+    await Promise.all([syncCwa(), syncAbs()]);
+}
+
+// saveBook() always forces shelves: [] into the write (see its source), which would
+// wipe an existing book's shelf assignments on every partial sync patch - use the
+// lower-level saveData() directly for patches to an EXISTING book instead.
+async function patchBookFields(bookId, fields) {
+    await saveData('books', fields, bookId);
+}
+
+async function syncCwa() {
+    const cfg = userProfile.cwaSync;
+    if (!cfg || !cfg.url || !cfg.token) return;
+    try {
+        const base = cfg.url.replace(/\/$/, '');
+        const resp = await fetch(`${base}/bookshelf/api/export`, {
+            headers: { 'X-Bookshelf-Token': cfg.token }
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const result = await resp.json();
+        if (result.status !== 'success') throw new Error(result.message || 'erro desconhecido');
+
+        for (const cwaBook of result.data.books) {
+            const norm = normalizeTitle(cwaBook.title);
+            const existing = allBooks.find(b => normalizeTitle(b.title) === norm);
+            if (existing) {
+                // Matched: only push status/progress forward, never touch fields the
+                // user (or another source) already set locally.
+                const patch = {};
+                const newStatus = betterStatus(existing.status, cwaBook.status);
+                if (newStatus !== existing.status) patch.status = newStatus;
+                if (!existing.startDate && cwaBook.startDate) patch.startDate = cwaBook.startDate;
+                if (!existing.endDate && cwaBook.endDate) patch.endDate = cwaBook.endDate;
+                if (Object.keys(patch).length > 0) await patchBookFields(existing.id, patch);
+            } else {
+                // No local match - bring it in as a new book, same as any manual add.
+                await saveBook({
+                    title: cwaBook.title,
+                    author: cwaBook.author,
+                    coverUrl: cwaBook.coverUrl,
+                    synopsis: cwaBook.synopsis,
+                    status: cwaBook.status || 'quero-ler',
+                    currentProgress: cwaBook.currentProgress || 0,
+                    startDate: cwaBook.startDate || '',
+                    endDate: cwaBook.endDate || '',
+                    mediaType: cwaBook.mediaType || 'digital',
+                });
+            }
+        }
+    } catch (e) {
+        console.warn('Sincronização com calibre-web-automated falhou:', e);
+    }
+}
+
+function formatDuration(seconds) {
+    if (!seconds) return null;
+    seconds = Math.floor(seconds);
+    const h = String(Math.floor(seconds / 3600)).padStart(2, '0');
+    const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+    const s = String(seconds % 60).padStart(2, '0');
+    return `${h}:${m}:${s}`;
+}
+
+async function syncAbs() {
+    const cfg = userProfile.absSync;
+    if (!cfg || !cfg.url || !cfg.token) return;
+    try {
+        const base = cfg.url.replace(/\/$/, '');
+        const headers = { 'Authorization': `Bearer ${cfg.token}` };
+
+        const librariesResp = await fetch(`${base}/api/libraries`, { headers });
+        if (!librariesResp.ok) throw new Error(`HTTP ${librariesResp.status} (libraries)`);
+        const libraries = (await librariesResp.json()).libraries || [];
+
+        const items = [];
+        for (const lib of libraries) {
+            if (lib.mediaType !== 'book') continue;
+            let page = 0;
+            while (true) {
+                const resp = await fetch(`${base}/api/libraries/${lib.id}/items?minified=1&limit=200&page=${page}`, { headers });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status} (items)`);
+                const data = await resp.json();
+                const results = data.results || [];
+                items.push(...results);
+                if (results.length < 200) break;
+                page += 1;
+            }
+        }
+
+        const authResp = await fetch(`${base}/api/authorize`, { method: 'POST', headers });
+        if (!authResp.ok) throw new Error(`HTTP ${authResp.status} (authorize)`);
+        const authData = await authResp.json();
+        const progressList = ((authData.user || {}).mediaProgress || []).filter(p => !p.episodeId);
+        const progressByItemId = Object.fromEntries(progressList.map(p => [p.libraryItemId, p]));
+
+        for (const item of items) {
+            const meta = (item.media || {}).metadata || {};
+            const title = meta.title || '';
+            const author = meta.authorName || '';
+            const prog = progressByItemId[item.id];
+            let absStatus = 'quero-ler';
+            if (prog) {
+                if (prog.isFinished) absStatus = 'lido';
+                else if (prog.currentTime) absStatus = 'lendo';
+            }
+
+            const norm = normalizeTitle(title);
+            const existing = allBooks.find(b => normalizeTitle(b.title) === norm);
+            if (existing) {
+                const patch = {};
+                const newStatus = betterStatus(existing.status, absStatus);
+                if (newStatus !== existing.status) patch.status = newStatus;
+                if (Object.keys(patch).length > 0) await patchBookFields(existing.id, patch);
+            } else {
+                await saveBook({
+                    title,
+                    author,
+                    coverUrl: `${base}/api/items/${item.id}/cover?token=${encodeURIComponent(cfg.token)}`,
+                    synopsis: meta.description || '',
+                    status: absStatus,
+                    mediaType: 'audiobook',
+                    currentProgress: (prog && prog.currentTime) || 0,
+                    totalTime: prog ? formatDuration(prog.duration) : null,
+                    startDate: prog && prog.startedAt ? new Date(prog.startedAt).toISOString().split('T')[0] : '',
+                    endDate: prog && prog.finishedAt ? new Date(prog.finishedAt).toISOString().split('T')[0] : '',
+                });
+            }
+        }
+    } catch (e) {
+        console.warn('Sincronização com Audiobookshelf falhou (normal se você não estiver na rede local dele):', e);
+    }
 }
 
 async function saveData(collectionName, data, docId = null) {
@@ -1272,6 +1440,25 @@ function renderSettings() {
             </div>
 
             <div class="card-expressive p-6">
+                <h2 class="text-xl font-bold mb-2 text-[hsl(var(--md-sys-color-primary))]">Integrações</h2>
+                <p class="text-sm text-neutral-400 mb-4">Sincroniza automaticamente ao abrir o site (leitura, nunca escreve nada de volta nesses servidores). Deixe em branco pra desligar.</p>
+                <form id="integrations-form" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-bold mb-2 text-neutral-300">Calibre-Web Automated</label>
+                        <input type="url" id="cwa-url" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 mb-2" placeholder="https://sua-instancia.exemplo.com" value="${(userProfile.cwaSync && userProfile.cwaSync.url) || ''}">
+                        <input type="text" id="cwa-token" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" placeholder="Token (BOOKSHELF_EXPORT_TOKEN)" value="${(userProfile.cwaSync && userProfile.cwaSync.token) || ''}">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold mb-2 text-neutral-300">Audiobookshelf</label>
+                        <p class="text-xs text-neutral-500 mb-2">Só sincroniza quando você abrir o site estando na mesma rede/VPN do servidor (URL local, ex: http://192.168.x.x:porta).</p>
+                        <input type="url" id="abs-url" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 mb-2" placeholder="http://192.168.x.x:13378" value="${(userProfile.absSync && userProfile.absSync.url) || ''}">
+                        <input type="text" id="abs-token" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" placeholder="Token da API do Audiobookshelf" value="${(userProfile.absSync && userProfile.absSync.token) || ''}">
+                    </div>
+                    <button type="submit" class="btn-expressive btn-primary w-full">Guardar Integrações</button>
+                </form>
+            </div>
+
+            <div class="card-expressive p-6">
                 <h2 class="text-xl font-bold mb-2 text-[hsl(var(--md-sys-color-primary))]">Sessão</h2>
                 <p class="text-neutral-300 mb-4">Você está ligado. Para sair, clique no botão abaixo.</p>
                 <button id="logout-btn" class="btn-expressive btn-tonal w-full">Sair da Conta</button>
@@ -1287,6 +1474,14 @@ function renderSettings() {
     document.getElementById('import-csv-btn').onclick = () => document.getElementById('csv-file-input').click();
     document.getElementById('csv-file-input').onchange = handleCsvImport;
     document.getElementById('export-csv-btn').onclick = handleCsvExport;
+    document.getElementById('integrations-form').onsubmit = async (e) => {
+        e.preventDefault();
+        await saveProfile({
+            cwaSync: { url: document.getElementById('cwa-url').value.trim(), token: document.getElementById('cwa-token').value.trim() },
+            absSync: { url: document.getElementById('abs-url').value.trim(), token: document.getElementById('abs-token').value.trim() },
+        }, false);
+        syncExternalSources();
+    };
     document.getElementById('logout-btn').onclick = () => { signOut(auth).then(() => { localStorage.clear(); window.location.href = 'index.html'; }); };
     document.getElementById('delete-all-books-btn').onclick = () => { showModal('Confirmar Exclusão Total', 'Tem a certeza?', [{ id: 'confirm-delete-all-btn', text: 'Sim, Excluir Tudo', class: 'bg-red-600 text-white', onClick: deleteAllBooks }]); };
 }
