@@ -331,7 +331,24 @@ function betterStatus(currentStatus, incomingStatus) {
 }
 
 async function syncExternalSources() {
-    await Promise.all([syncCwa(), syncAbs()]);
+    const [cwa, abs] = await Promise.all([syncCwa(), syncAbs()]);
+    return { cwa, abs };
+}
+
+function describeSyncResult(name, r) {
+    if (!r || r.skipped) return `${name}: não configurado.`;
+    if (r.ok) return `${name}: ok, ${r.count} de ${r.total} livro(s) atualizado(s)/adicionado(s).`;
+    return `${name}: falhou - ${r.error}. Veja o console (F12) pra detalhes (CORS/mixed content são as causas mais comuns).`;
+}
+
+async function runSyncAndReport() {
+    showLoading('Sincronizando...');
+    const { cwa, abs } = await syncExternalSources();
+    hideModal();
+    showModal('Sincronização', `
+        <p class="mb-2">${describeSyncResult('Calibre-Web Automated', cwa)}</p>
+        <p>${describeSyncResult('Audiobookshelf', abs)}</p>
+    `);
 }
 
 // saveBook() always forces shelves: [] into the write (see its source), which would
@@ -343,16 +360,20 @@ async function patchBookFields(bookId, fields) {
 
 async function syncCwa() {
     const cfg = userProfile.cwaSync;
-    if (!cfg || !cfg.url || !cfg.token) return;
+    if (!cfg || !cfg.url || !cfg.token) return { skipped: true };
     try {
         const base = cfg.url.replace(/\/$/, '');
-        const resp = await fetch(`${base}/bookshelf/api/export`, {
+        // The sidecar (sidecar/app.py) serves this at /api/export directly - no
+        // /bookshelf prefix, unlike the old embedded-in-CWA blueprint this used to
+        // point at before the architecture moved to a standalone sidecar.
+        const resp = await fetch(`${base}/api/export`, {
             headers: { 'X-Bookshelf-Token': cfg.token }
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const result = await resp.json();
         if (result.status !== 'success') throw new Error(result.message || 'erro desconhecido');
 
+        let count = 0;
         for (const cwaBook of result.data.books) {
             const norm = normalizeTitle(cwaBook.title);
             const existing = allBooks.find(b => normalizeTitle(b.title) === norm);
@@ -364,7 +385,7 @@ async function syncCwa() {
                 if (newStatus !== existing.status) patch.status = newStatus;
                 if (!existing.startDate && cwaBook.startDate) patch.startDate = cwaBook.startDate;
                 if (!existing.endDate && cwaBook.endDate) patch.endDate = cwaBook.endDate;
-                if (Object.keys(patch).length > 0) await patchBookFields(existing.id, patch);
+                if (Object.keys(patch).length > 0) { await patchBookFields(existing.id, patch); count++; }
             } else {
                 // No local match - bring it in as a new book, same as any manual add.
                 await saveBook({
@@ -373,15 +394,17 @@ async function syncCwa() {
                     coverUrl: cwaBook.coverUrl,
                     synopsis: cwaBook.synopsis,
                     status: cwaBook.status || 'quero-ler',
-                    currentProgress: cwaBook.currentProgress || 0,
                     startDate: cwaBook.startDate || '',
                     endDate: cwaBook.endDate || '',
                     mediaType: cwaBook.mediaType || 'digital',
                 });
+                count++;
             }
         }
+        return { ok: true, count, total: result.data.books.length };
     } catch (e) {
         console.warn('Sincronização com calibre-web-automated falhou:', e);
+        return { ok: false, error: e.message };
     }
 }
 
@@ -396,7 +419,7 @@ function formatDuration(seconds) {
 
 async function syncAbs() {
     const cfg = userProfile.absSync;
-    if (!cfg || !cfg.url || !cfg.token) return;
+    if (!cfg || !cfg.url || !cfg.token) return { skipped: true };
     try {
         const base = cfg.url.replace(/\/$/, '');
         const headers = { 'Authorization': `Bearer ${cfg.token}` };
@@ -426,6 +449,7 @@ async function syncAbs() {
         const progressList = ((authData.user || {}).mediaProgress || []).filter(p => !p.episodeId);
         const progressByItemId = Object.fromEntries(progressList.map(p => [p.libraryItemId, p]));
 
+        let count = 0;
         for (const item of items) {
             const meta = (item.media || {}).metadata || {};
             const title = meta.title || '';
@@ -443,7 +467,7 @@ async function syncAbs() {
                 const patch = {};
                 const newStatus = betterStatus(existing.status, absStatus);
                 if (newStatus !== existing.status) patch.status = newStatus;
-                if (Object.keys(patch).length > 0) await patchBookFields(existing.id, patch);
+                if (Object.keys(patch).length > 0) { await patchBookFields(existing.id, patch); count++; }
             } else {
                 await saveBook({
                     title,
@@ -457,10 +481,13 @@ async function syncAbs() {
                     startDate: prog && prog.startedAt ? new Date(prog.startedAt).toISOString().split('T')[0] : '',
                     endDate: prog && prog.finishedAt ? new Date(prog.finishedAt).toISOString().split('T')[0] : '',
                 });
+                count++;
             }
         }
+        return { ok: true, count, total: items.length };
     } catch (e) {
         console.warn('Sincronização com Audiobookshelf falhou (normal se você não estiver na rede local dele):', e);
+        return { ok: false, error: e.message };
     }
 }
 
@@ -1445,7 +1472,8 @@ function renderSettings() {
                 <form id="integrations-form" class="space-y-4">
                     <div>
                         <label class="block text-sm font-bold mb-2 text-neutral-300">Calibre-Web Automated</label>
-                        <input type="url" id="cwa-url" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 mb-2" placeholder="https://sua-instancia.exemplo.com" value="${(userProfile.cwaSync && userProfile.cwaSync.url) || ''}">
+                        <p class="text-xs text-neutral-500 mb-2">URL do <strong>sidecar de exportação</strong> (bookshelf-export-sidecar, porta 5000 por padrão) - não é a URL normal do calibre-web, é um serviço à parte. Precisa de HTTPS pra funcionar aqui (a página é HTTPS, o navegador bloqueia buscar HTTP).</p>
+                        <input type="url" id="cwa-url" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3 mb-2" placeholder="https://seu-dominio-do-sidecar.exemplo.com" value="${(userProfile.cwaSync && userProfile.cwaSync.url) || ''}">
                         <input type="text" id="cwa-token" class="w-full bg-neutral-800 border-2 border-neutral-700 rounded-xl p-3" placeholder="Token (BOOKSHELF_EXPORT_TOKEN)" value="${(userProfile.cwaSync && userProfile.cwaSync.token) || ''}">
                     </div>
                     <div>
@@ -1456,6 +1484,7 @@ function renderSettings() {
                     </div>
                     <button type="submit" class="btn-expressive btn-primary w-full">Guardar Integrações</button>
                 </form>
+                <button id="sync-now-btn" class="btn-expressive btn-tonal w-full mt-4"><span class="material-symbols-outlined mr-2">sync</span> Sincronizar agora</button>
             </div>
 
             <div class="card-expressive p-6">
@@ -1476,12 +1505,16 @@ function renderSettings() {
     document.getElementById('export-csv-btn').onclick = handleCsvExport;
     document.getElementById('integrations-form').onsubmit = async (e) => {
         e.preventDefault();
-        await saveProfile({
-            cwaSync: { url: document.getElementById('cwa-url').value.trim(), token: document.getElementById('cwa-token').value.trim() },
-            absSync: { url: document.getElementById('abs-url').value.trim(), token: document.getElementById('abs-token').value.trim() },
-        }, false);
-        syncExternalSources();
+        const cwaSync = { url: document.getElementById('cwa-url').value.trim(), token: document.getElementById('cwa-token').value.trim() };
+        const absSync = { url: document.getElementById('abs-url').value.trim(), token: document.getElementById('abs-token').value.trim() };
+        // Update the local copy directly instead of waiting for the profile onSnapshot
+        // listener to refire (Firestore write + listener round-trip isn't guaranteed to
+        // land before syncExternalSources() below reads userProfile.cwaSync/absSync).
+        userProfile = { ...userProfile, cwaSync, absSync };
+        await saveProfile({ cwaSync, absSync }, false);
+        await runSyncAndReport();
     };
+    document.getElementById('sync-now-btn').onclick = runSyncAndReport;
     document.getElementById('logout-btn').onclick = () => { signOut(auth).then(() => { localStorage.clear(); window.location.href = 'index.html'; }); };
     document.getElementById('delete-all-books-btn').onclick = () => { showModal('Confirmar Exclusão Total', 'Tem a certeza?', [{ id: 'confirm-delete-all-btn', text: 'Sim, Excluir Tudo', class: 'bg-red-600 text-white', onClick: deleteAllBooks }]); };
 }
