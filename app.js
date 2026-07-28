@@ -331,8 +331,66 @@ function betterStatus(currentStatus, incomingStatus) {
 }
 
 async function syncExternalSources() {
-    const [cwa, abs] = await Promise.all([syncCwa(), syncAbs()]);
+    // Shared across both sources and mutated synchronously (before any `await`) the
+    // instant a title is matched or a new book is created, so CWA and ABS running
+    // concurrently below can never both decide "no match" for the same title and each
+    // create their own duplicate - JS interleaves at await boundaries only, so a plain
+    // synchronous Map.set() here is effectively atomic between the two loops.
+    const knownTitles = new Map();
+    for (const b of allBooks) knownTitles.set(normalizeTitle(b.title), b);
+
+    const [cwa, abs] = await Promise.all([syncCwa(knownTitles), syncAbs(knownTitles)]);
     return { cwa, abs };
+}
+
+// One-off cleanup for duplicates created before the knownTitles race fix above (CWA
+// and Audiobookshelf syncs running concurrently could each create their own copy of
+// the same book). Groups allBooks by normalized title, keeps the entry with the most
+// filled-in fields per group, merges status (best wins) and shelves (union) into it,
+// and deletes the rest.
+async function removeDuplicateBooks() {
+    const groups = new Map();
+    for (const b of allBooks) {
+        const norm = normalizeTitle(b.title);
+        if (!norm) continue;
+        if (!groups.has(norm)) groups.set(norm, []);
+        groups.get(norm).push(b);
+    }
+
+    let removed = 0;
+    let merged = 0;
+    const dupGroups = [...groups.values()].filter(g => g.length > 1);
+    for (const group of dupGroups) {
+        const score = (b) => ['coverUrl', 'synopsis', 'review', 'rating'].filter(k => b[k]).length;
+        group.sort((a, b) => score(b) - score(a));
+        const [keeper, ...dupes] = group;
+
+        let bestStatus = keeper.status;
+        const shelves = new Set(keeper.shelves || []);
+        for (const d of dupes) {
+            bestStatus = betterStatus(bestStatus, d.status);
+            (d.shelves || []).forEach(s => shelves.add(s));
+        }
+        const patch = {};
+        if (bestStatus !== keeper.status) patch.status = bestStatus;
+        if (shelves.size !== (keeper.shelves || []).length) patch.shelves = [...shelves];
+        if (Object.keys(patch).length > 0) { await patchBookFields(keeper.id, patch); merged++; }
+
+        for (const d of dupes) {
+            await deleteDoc(doc(db, "users", userId, "books", d.id));
+            removed++;
+        }
+    }
+    return { removed, merged, groups: dupGroups.length };
+}
+
+async function runRemoveDuplicates() {
+    showLoading('Procurando duplicados...');
+    const { removed, merged, groups } = await removeDuplicateBooks();
+    hideModal();
+    showModal('Duplicados removidos', groups === 0
+        ? '<p>Não encontrei nenhum livro duplicado.</p>'
+        : `<p>${groups} grupo(s) de duplicados encontrados. ${removed} cópia(s) removida(s), ${merged} livro(s) com estante/status combinados a partir das cópias.</p>`);
 }
 
 function describeSyncResult(name, r) {
@@ -358,7 +416,7 @@ async function patchBookFields(bookId, fields) {
     await saveData('books', fields, bookId);
 }
 
-async function syncCwa() {
+async function syncCwa(knownTitles) {
     const cfg = userProfile.cwaSync;
     if (!cfg || !cfg.url || !cfg.token) return { skipped: true };
     try {
@@ -376,8 +434,8 @@ async function syncCwa() {
         let count = 0;
         for (const cwaBook of result.data.books) {
             const norm = normalizeTitle(cwaBook.title);
-            const existing = allBooks.find(b => normalizeTitle(b.title) === norm);
-            if (existing) {
+            const existing = knownTitles.get(norm);
+            if (existing && typeof existing === 'object') {
                 // Matched: only push status/progress forward, never touch fields the
                 // user (or another source) already set locally.
                 const patch = {};
@@ -386,8 +444,12 @@ async function syncCwa() {
                 if (!existing.startDate && cwaBook.startDate) patch.startDate = cwaBook.startDate;
                 if (!existing.endDate && cwaBook.endDate) patch.endDate = cwaBook.endDate;
                 if (Object.keys(patch).length > 0) { await patchBookFields(existing.id, patch); count++; }
-            } else {
-                // No local match - bring it in as a new book, same as any manual add.
+            } else if (!existing) {
+                // No local match, and nothing else in this sync pass has claimed this
+                // title yet either - claim it immediately (before the write below even
+                // starts) so a concurrent ABS match for the same title doesn't also
+                // create it.
+                knownTitles.set(norm, true);
                 await saveBook({
                     title: cwaBook.title,
                     author: cwaBook.author,
@@ -400,6 +462,7 @@ async function syncCwa() {
                 });
                 count++;
             }
+            // else: already claimed by this same sync pass (e.g. ABS got there first) - skip.
         }
         return { ok: true, count, total: result.data.books.length };
     } catch (e) {
@@ -417,7 +480,7 @@ function formatDuration(seconds) {
     return `${h}:${m}:${s}`;
 }
 
-async function syncAbs() {
+async function syncAbs(knownTitles) {
     const cfg = userProfile.absSync;
     if (!cfg || !cfg.url || !cfg.token) return { skipped: true };
     try {
@@ -462,13 +525,14 @@ async function syncAbs() {
             }
 
             const norm = normalizeTitle(title);
-            const existing = allBooks.find(b => normalizeTitle(b.title) === norm);
-            if (existing) {
+            const existing = knownTitles.get(norm);
+            if (existing && typeof existing === 'object') {
                 const patch = {};
                 const newStatus = betterStatus(existing.status, absStatus);
                 if (newStatus !== existing.status) patch.status = newStatus;
                 if (Object.keys(patch).length > 0) { await patchBookFields(existing.id, patch); count++; }
-            } else {
+            } else if (!existing) {
+                knownTitles.set(norm, true);
                 await saveBook({
                     title,
                     author,
@@ -483,6 +547,7 @@ async function syncAbs() {
                 });
                 count++;
             }
+            // else: already claimed by this same sync pass - skip.
         }
         return { ok: true, count, total: items.length };
     } catch (e) {
@@ -1495,7 +1560,8 @@ function renderSettings() {
 
             <div class="card-expressive p-6 border-l-4 border-red-500">
                 <h2 class="text-xl font-bold mb-2 text-red-400">Zona de Perigo</h2>
-                 <p class="text-neutral-300 mb-4">A ação abaixo é irreversível. Tenha a certeza do que está a fazer.</p>
+                 <p class="text-neutral-300 mb-4">As ações abaixo são irreversíveis. Tenha a certeza do que está a fazer.</p>
+                <button id="remove-duplicates-btn" class="btn-expressive bg-red-800/80 hover:bg-red-800 text-white w-full mb-3">Remover Duplicados</button>
                 <button id="delete-all-books-btn" class="btn-expressive bg-red-800/80 hover:bg-red-800 text-white w-full">Deletar Todos os Livros</button>
             </div>
          </div>`;
@@ -1516,6 +1582,7 @@ function renderSettings() {
     };
     document.getElementById('sync-now-btn').onclick = runSyncAndReport;
     document.getElementById('logout-btn').onclick = () => { signOut(auth).then(() => { localStorage.clear(); window.location.href = 'index.html'; }); };
+    document.getElementById('remove-duplicates-btn').onclick = () => { showModal('Remover Duplicados', 'Isso vai combinar e apagar livros com o mesmo título (mantendo só um de cada, com o status/estantes combinados). Continuar?', [{ id: 'confirm-remove-duplicates-btn', text: 'Sim, Remover', class: 'bg-red-600 text-white', onClick: runRemoveDuplicates }]); };
     document.getElementById('delete-all-books-btn').onclick = () => { showModal('Confirmar Exclusão Total', 'Tem a certeza?', [{ id: 'confirm-delete-all-btn', text: 'Sim, Excluir Tudo', class: 'bg-red-600 text-white', onClick: deleteAllBooks }]); };
 }
 
